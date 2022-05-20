@@ -220,6 +220,84 @@ function graph_to_dot(g)
   return s
 end
 
+-- also adds nodes for "code" lines (to merge multiple arcs with the same
+-- annotation)
+function graph_to_dot_detailed(g, detailed)
+  local s = [[digraph states {
+	  size="3,2";
+	  rankdir=TB;
+
+  ]]
+  -- write out the nodes.
+  local k, v
+  local nodes = {}
+
+  --[[
+  for k, v in ipairs(g) do
+    for i, dst in pairs(v.dst) do
+      -- use shape=diamond for inputs.
+      local shape
+      if v.cmd == 'input' then
+        shape = 'ellipse'  -- TODO
+      else
+        shape = 'ellipse'
+      end
+      if not nodes[dst] then
+        s = s .. dst .. ' [label = "' .. dst .. '", shape=' .. shape .. '];\n'
+        nodes[dst] = 1
+      end
+    end
+  end
+
+  -- use shape=diamond for outputs. TODO this is a NOP
+  for k, v in ipairs(g) do
+    if v.cmd == 'output' then
+      for i, dep in pairs(v.deps) do
+        local shape
+        shape = 'circle'
+        if not nodes[dep] then
+          s = s .. dep .. ' [label = "' .. dep .. '", shape=' .. shape .. '];\n'
+          nodes[dep] = 1
+        end
+      end
+    end
+  end
+  --]]
+
+  -- write out the edges: edge from node to its deps.
+  nodes = {}
+  local i1, node, i2, dst, i3, dep, doneedges, edge_label
+  doneedges = {}
+  for i1, node in ipairs(g) do
+    for i2, dst in ipairs(node.dst) do
+      for i3, dep in ipairs(node.deps) do
+        if detailed then
+          local code_node_name = 'line_' .. i1
+          local code_node_label = node.cmd
+          edge_label = code_node_name
+          if not nodes[code_node_name] then
+            s = s .. code_node_name .. ' [label = "' .. code_node_label .. '", shape=box];\n'
+          end
+          if not doneedges[dep .. code_node_name] then
+            s = s .. dep .. ' -> ' .. code_node_name .. ' [label = "' .. edge_label .. '"] ;\n'
+            doneedges[dep .. code_node_name] = 1
+          end
+          if not doneedges[code_node_name .. dst] then
+            s = s .. code_node_name .. ' -> ' .. dst .. ' [label = "' .. edge_label .. '"] ;\n'
+            doneedges[code_node_name .. dst] = 1
+          end
+        else
+          local edge_label = 'line_' .. i1
+          s = s .. dep .. ' -> ' .. dst .. ' [label = "' .. edge_label .. '"] ;\n'
+        end
+      end
+    end
+  end
+
+  s = s .. '}\n'
+  return s
+end
+
 --[[
 inputs(g, {'root_sitemapstxt'})
 outputs(g, {'allpages'})
@@ -268,7 +346,9 @@ function foreach_version (g)
     update allpages: append pages
   endforeach
   --]]
-  build(g, {'root_sitemapstxt'}, '', {})
+  inputs(g, {'root_sitemapstxt'})  -- TODO: input/output processing. auto?
+  outputs(g, {'allpages'})
+
   build(g, {'root_sitemaps'}, 'lua [line for line in root_sitemaps.txt]', {'root_sitemapstxt'})
   build(g, {'allpages'}, 'new list', {})
   build(g, {'queue'}, 'copy root_sitemaps', {'root_sitemaps'})
@@ -277,7 +357,7 @@ function foreach_version (g)
   break_if(g, 'level > 3', {'level'})
   build(g, {'xmlfile'}, 'wget url', {'url'})
   build(g, {'pages', 'indexes'}, 'extract_from xml', {'xmlfile'})
-  update(g, {'queue'}, 'append indexes', {'indexes'})
+  update(g, {'queue'}, 'py append [(x, level+1) for x in indexes]', {'indexes', 'level'})
   update(g, {'allpages'}, 'append pages', {'pages'})
   -- endforeach(g, 'item')
   -- output(g, {'allpages'})
@@ -289,8 +369,8 @@ local g = {}
 build(g, {'START'}, '', {})
 build(g, {'END'}, '', {})
 
-explicit_control_version(g)
--- foreach_version(g)
+-- explicit_control_version(g)
+foreach_version(g)
 
 
 -- genius: *REBUILD*
@@ -308,4 +388,4 @@ explicit_control_version(g)
 print('/*')
 print(graph_to_str(g))
 print('*/')
-print(graph_to_dot(g))
+print(graph_to_dot_detailed(g, true))
