@@ -25,12 +25,58 @@
 
 startkey = 'START'
 endkey = 'END'
+outputskey = 'OUTPUTS'
 
 -- deps is a list
 function build(g, dst, rule, deps)
-  g[1+#g] = {cmd = 'build', dst = dst, rule = rule, deps = deps}
+  local newkey = 1+#g
+  g[newkey] = {cmd = 'build', dst = dst, rule = rule, deps = deps}
+  return newkey
+end
+
+-- documentation only: nop.
+function inputs(g, dst)
+  -- connecting to START for display purposes.
+  g[1+#g] = {cmd = 'dot', dst = {'INPUTS'}, rule = '', deps = {startkey}}
+  local i, v
+  for i, v in ipairs(dst) do
+    g[1+#g] = {cmd = 'input', dst = {v}, rule = '', deps = {'INPUTS'}}
+  end
   return 1
 end
+
+-- documentation only: nop
+function outputs(g, deps)
+  -- Using a "supernode" for dot display purposes.
+  g[1+#g] = {cmd = 'output', dst = {'OUTPUTS'}, rule = '', deps = deps}
+  g[1+#g] = {cmd = 'dot', dst = {endkey}, rule = '', deps = {'OUTPUTS'}}
+  --[[
+  for i, dep in ipairs(deps) do
+    g[1+#g] = {cmd = 'output', dst = {'OUTPUTS'}, rule = '', deps = {dep}}
+  end
+  --]]
+  return 1
+end
+
+function start(g, deps)
+  local linenum = 1+#g
+  local i, dep
+  for i, dep in ipairs(deps) do
+    g[1+#g] = {cmd = 'start', dst = {dep}, rule = '', deps = {startkey}}
+  end
+  return 1
+end
+
+--[[
+-- TODO?: special case of build: sink so no dst (sinks cannot be referred to)
+-- TODO?: output(g, {'allpages'}, {'allpages'})
+-- syntax sugar for documentation/readability.
+function output(g, dst)
+  if rule == nil then rule = '' end
+  g[1+#g] = {cmd = 'output', dst = dst, rule = '', deps = {}}
+  return 1
+end
+--]]
 
 function update(g, dst, rule, deps)
   g[1+#g] = {cmd = 'update', dst = dst, rule = rule, deps = deps}
@@ -40,13 +86,19 @@ end
 -- end_if(g, 'queue.length > 0', {'queue'})
 function end_if(g, condition, deps)
   local linenum = 1+#g
-  g[1+#g] = {cmd = 'end_if', dst = {endkey}, rule = condition, deps = deps}
+  g[1+#g] = {cmd = 'end_if', dst = {outputskey}, rule = condition, deps = deps}
   return 1
 end
 
 function break_if(g, condition, deps)
   local linenum = 1+#g
   g[1+#g] = {cmd = 'break_if', dst = {'break_' .. linenum}, rule = condition, deps = deps}
+  return 1
+end
+
+function goto_if(g, dst, condition, deps)
+  local linenum = 1+#g
+  g[1+#g] = {cmd = 'goto_if', dst = dst, rule = condition, deps = deps}
   return 1
 end
 
@@ -61,27 +113,12 @@ function endforeach(g, dst)
   local linenum = 1+#g
   local i, dep
   local myname = 'endfor_' .. linenum
-  for i, v in pairs(dst) do
+  for i, v in ipairs(dst) do
     g[1+#g] = {cmd = 'endforeach', dst = {v}, rule = 'endforeach', deps = {myname}}
   end
   return 1
 end
 --]]
-
-function start(g, deps)
-  local linenum = 1+#g
-  local i, dep
-  for i, dep in pairs(deps) do
-    g[1+#g] = {cmd = 'start', dst = {dep}, rule = '', deps = {startkey}}
-  end
-  return 1
-end
-
-function output(g, deps)
-  local linenum = 1+#g
-  g[1+#g] = {cmd = 'output', dst = {endkey}, rule = '', deps = deps}
-  return 1
-end
 
 function list_to_str(l)
   local s, i
@@ -100,7 +137,7 @@ end
 function graph_to_str(g)
   local k, v, s
   local s = '{' .. '\n'
-  for k, v in pairs(g) do
+  for k, v in ipairs(g) do
     -- print(k)
     s = s .. '  {'
     s = s .. 'linenum = '
@@ -119,7 +156,7 @@ end
 
 function print_graph(g)
   local k, v
-  for k, v in pairs(g) do
+  for k, v in ipairs(g) do
     -- print(k .. ': ->', v.linenum, v.dst, '"' .. v.rule .. '"', 'deps: ', list_to_str(v.deps))
     -- print(k .. ': ->', v)
   end
@@ -157,17 +194,21 @@ function graph_to_dot(g)
   ]]
   -- write out the nodes.
   local k, v
-  for k, v in pairs(g) do
+  local nodes = {}
+  for k, v in ipairs(g) do
     for i, dst in pairs(v.dst) do
-      s = s .. dst .. ' [label = "' .. dst .. '"];\n'
+      if not nodes[dst] then
+        s = s .. dst .. ' [label = "' .. dst .. '"];\n'
+        nodes[dst] = 1
+      end
     end
   end
 
   -- write out the edges: edge from node to its deps.
   local i1, node, i2, dst, i3, dep
-  for i1, node in pairs(g) do
-    for i2, dst in pairs(node.dst) do
-      for i3, dep in pairs(node.deps) do
+  for i1, node in ipairs(g) do
+    for i2, dst in ipairs(node.dst) do
+      for i3, dep in ipairs(node.deps) do
         local edge_label = i1
         s = s .. dep .. ' -> ' .. dst .. ' [label = "line-' .. edge_label .. '"] ;\n'
         -- s = s .. dst .. ' -> ' .. dep .. ' [label = "line-' .. edge_label .. '"] ;\n'
@@ -179,21 +220,38 @@ function graph_to_dot(g)
   return s
 end
 
+--[[
+inputs(g, {'root_sitemapstxt'})
+outputs(g, {'allpages'})
+build(g, {'root_sitemapstxt'}, '', {})
+build(g, {'root_sitemaps'}, 'lua [line for line in root_sitemaps.txt]', {'root_sitemapstxt'})
+build(g, {'allpages'}, 'new list', {})
+build(g, {'queue'}, 'copy root_sitemaps', {'root_sitemaps'})
+end_if(g, 'queue.length <= 0', {'queue'})
+build(g, {'item'}, 'queue.pop()', {'queue'})
+build(g, {'url', 'level'}, 'unpack item', {'item'})
+end_if(g, 'level > 3', {'level'})
+build(g, {'xmlfile'}, 'wget url', {'url'})
+build(g, {'pages', 'indexes'}, 'extract_from xml', {'xmlfile'})
+update(g, {'queue'}, 'py append [(x, level+1) for x in indexes]', {'indexes', 'level'})
+update(g, {'allpages'}, 'append pages', {'pages'})
+--]]
 function explicit_control_version(g)
-  start(g, {'root_sitemapstxt'})
-  build(g, {'root_sitemapstxt'}, '', {})
-  build(g, {'root_sitemaps'}, 'lua [line for line in root_sitemaps.txt]', {'root_sitemapstxt'})
+  inputs(g, {'root_sitemapstxt'})  -- TODO: input/output processing. auto?
+  outputs(g, {'allpages'})
+  build(g, {'root_sitemaps'}, 'lua [line for line in root_sitemapstxt]', {'root_sitemapstxt'})
   build(g, {'allpages'}, 'new list', {})
   build(g, {'queue'}, 'copy root_sitemaps', {'root_sitemaps'})
-  goto_if(g, {'END'}, 'queue.length <= 0', {'queue'})
+  end_if(g, 'queue.length <= 0', {'queue'})
   build(g, {'item'}, 'queue.pop()', {'queue'})
   build(g, {'url', 'level'}, 'unpack item', {'item'})
-  goto_if(g, {'item'}, 'level > 3', {'level'})
+  goto_if(g, {'anymore'}, 'level > 3', {'level'})
+  build(g, {'anymore'}, 'queue.length > 0', {'queue'})
+  goto_if(g, {'item'}, 'anymore != false', {'anymore'})
   build(g, {'xmlfile'}, 'wget url', {'url'})
   build(g, {'pages', 'indexes'}, 'extract_from xml', {'xmlfile'})
-  update(g, {'queue'}, 'append indexes', {'indexes'})
+  update(g, {'queue'}, 'py append [(x, level+1) for x in indexes]', {'indexes', 'level'})
   update(g, {'allpages'}, 'append pages', {'pages'})
-  -- output(g, {'allpages'})
 end
 
 function foreach_version (g)
@@ -234,22 +292,6 @@ build(g, {'END'}, '', {})
 explicit_control_version(g)
 -- foreach_version(g)
 
---[[
--- start(g, {'root_sitemapstxt'})
-build(g, {'root_sitemapstxt'}, '', {})
-build(g, {'root_sitemaps'}, 'lua [line for line in root_sitemaps.txt]', {'root_sitemapstxt'})
-build(g, {'allpages'}, 'new list', {})
-build(g, {'queue'}, 'copy root_sitemaps', {'root_sitemaps'})
-end_if(g, 'queue.length <= 0', {'queue'})
-build(g, {'item'}, 'queue.pop()', {'queue'})
-build(g, {'url', 'level'}, 'unpack item', {'item'})
-end_if(g, 'level > 3', {'level'})
-build(g, {'xmlfile'}, 'wget url', {'url'})
-build(g, {'pages', 'indexes'}, 'extract_from xml', {'xmlfile'})
-update(g, {'queue'}, 'append indexes', {'indexes'})
-update(g, {'allpages'}, 'append pages', {'pages'})
--- output(g, {'allpages'})
---]]
 
 -- genius: *REBUILD*
 
