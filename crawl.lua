@@ -2,12 +2,12 @@
 # build root_sitemaps: python [line for line in root_sitemaps.txt]
 # build allpages: list
 # build queue: root_sitemaps
-# gate queue.length > 0
+# exit: if queue.length > 0
 # build url, level: queue.pop()
-# gate level <= 3
+# goto url, level: if level > 3
 # build xml: wget url
 # build pages, indexes: extract_from xml
-# update queue: append indexes
+# update queue: append [(x, level+1) for x in indexes]
 # update allpages: append pages
 
 # build root_sitemaps: python [line for line in root_sitemaps.txt]
@@ -15,7 +15,7 @@
 # build queue: root_sitemaps
 # foreach item: queue
 #   build url, level: item
-#   break_if level > 3
+#   break: if level > 3
 #   build xml: wget url
 #   build pages, indexes: extract_from xml
 #   update queue: append indexes
@@ -308,7 +308,7 @@ build(g, {'queue'}, 'copy root_sitemaps', {'root_sitemaps'})
 end_if(g, 'queue.length <= 0', {'queue'})
 build(g, {'item'}, 'queue.pop()', {'queue'})
 build(g, {'url', 'level'}, 'unpack item', {'item'})
-end_if(g, 'level > 3', {'level'})
+goto_if(g, 'item', 'level > 3', {'level'})
 build(g, {'xmlfile'}, 'wget url', {'url'})
 build(g, {'pages', 'indexes'}, 'extract_from xml', {'xmlfile'})
 update(g, {'queue'}, 'py append [(x, level+1) for x in indexes]', {'indexes', 'level'})
@@ -339,7 +339,7 @@ function foreach_version (g)
   build queue: root_sitemaps
   foreach item: fifo queue
     build url, level: item
-    break_if level > 3
+    break: if level > 3
     build xml: wget url
     build pages, indexes: extract_from xml
     update queue: append indexes
@@ -363,29 +363,33 @@ function foreach_version (g)
   -- output(g, {'allpages'})
 end
 
-local g = {}
+function main ()
+  local g = {}
 
--- TODO?: autoadd the dependencies to these.
-build(g, {'START'}, '', {})
-build(g, {'END'}, '', {})
+  -- TODO?: autoadd the dependencies to these.
+  build(g, {'START'}, '', {})
+  build(g, {'END'}, '', {})
 
--- explicit_control_version(g)
-foreach_version(g)
+  -- explicit_control_version(g)
+  foreach_version(g)
 
+  -- genius: *REBUILD*
 
--- genius: *REBUILD*
+  --[[
+  build url, level: queue.pop()
+  gate level <= 3
+  build xml: wget url
+  build pages, indexes: extract_from xml
+  update queue: append indexes
+  update allpages: append pages
+  --]]
 
---[[
-# build url, level: queue.pop()
-# gate level <= 3
-# build xml: wget url
-# build pages, indexes: extract_from xml
-# update queue: append indexes
-# update allpages: append pages
---]]
+  -- print_graph(g)
+  print('/*')
+  print(graph_to_str(g))
+  print('*/')
+  print(graph_to_dot_detailed(g, true))
+end
 
--- print_graph(g)
-print('/*')
-print(graph_to_str(g))
-print('*/')
-print(graph_to_dot_detailed(g, true))
+main()
+
