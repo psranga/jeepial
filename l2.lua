@@ -26,6 +26,8 @@ dofile('stdlib.lua')
 --]]
 
 startdst = 'START'
+startkey = startdst
+START = startdst
 endkey = 'END'
 outputskey = 'OUTPUTS'
 
@@ -429,6 +431,7 @@ function update_deps(ctx)
     end
     local words = split(code, '[' .. escaped_patt .. ']+')
     local deps = {}
+    local num_deps = 0
     dlog('update_deps', 'words=', words)
     for j, w in ipairs(words) do
       dlog('update_deps', '  w=', w, ' all_dsts[w]=', all_dsts[w])
@@ -437,8 +440,12 @@ function update_deps(ctx)
         -- ==> there's a dependency between w's destination ('p.dst') and 'w'.
         -- ==> Add w to 'p.deps'
         deps[w] = {w, linenum}
+        num_deps = num_deps + 1
         dlog('update_deps', '    found dep: ', w)
       end
+    end
+    if num_deps == 0 then
+      table.insert(deps, {START, linenum})
     end
     p.deps = values(deps)
     dlog('update_deps', '--> deps=', deps, " (code=", p.code, ')\n')
@@ -551,6 +558,7 @@ function find_all_deps_of(ctx, needle_dst)
 end
 
 function find_all_dsts_of(ctx, needle_dep)
+  dlog('find_all_dsts_of', needle_dep)
   local nodes = {}
   for i, p in ipairs(ctx.parsed_lines) do
     for j, dst in ipairs(p.dsts) do
@@ -570,7 +578,7 @@ function find_roots(ctx)
   local roots = {}
   for i, dst in ipairs(dsts) do
     local all_deps = find_all_deps_of(ctx, dst)
-    if #all_deps == 0 then
+    if (#all_deps == 0) or list_find(all_deps, startkey) then
       roots[1+#roots] = dst
     end
   end
@@ -589,6 +597,14 @@ function find_sinks(ctx)
   return sinks
 end
 
+function gen_nonce(ctx)
+  if not ctx.nonce then
+    ctx.nonce = 0
+  end
+  ctx.nonce = ctx.nonce + 1
+  return ctx.nonce
+end
+
 function run_program(ctx, executor)
   local roots = find_roots(ctx)
   local sinks = find_sinks(ctx)
@@ -598,33 +614,47 @@ function run_program(ctx, executor)
 
   local ready_dsts = {}
   for i, dst in ipairs(roots) do
-    table.insert(ready_dsts, {dst, startdst}) -- src is unset == nil
+    table.insert(ready_dsts, {dst, startdst, 1}) -- no nonce. no unrolling happened.
   end
 
-  dlog('\n')
+  dlog('run_program', '\n')
   local loopdet_dsts = {}
   local dst_values = {} -- map
 
   while #ready_dsts > 0 do
     dlog('run_program', 'ready_dsts=', ready_dsts)
-    local ready_dst, src = table.unpack(table.remove(ready_dsts))
+    local rolled_dst, src, unroll_nonce = table.unpack(table.remove(ready_dsts, 1))
+    local ready_dst = rolled_dst .. '-' .. unroll_nonce
+
     if loopdet_dsts[ready_dst] then
       dlog('run_program', 'ignoring for this epoch. ready_dst=', ready_dst, '. already done or in progress')
     else
       loopdet_dsts[ready_dst] = 1
       dlog('run_program', ready_dst, ' starting')
 
-      local dst_value, new_subroots = executor(ready_dst, src, dst_values)
-      dst_values[ready_dst] = dst_value
+      local dst_value, unrolled_values = executor(rolled_dst, src, unroll_nonce, dst_values)
 
       dlog('run_program', ready_dst, ' value=', dst_value)
-      dlog('run_program', ready_dst, ' new_subroots=', new_subroots)
-      dlog('run_program', ready_dst, ' my_dsts=', my_dsts)
-      local my_dsts = find_all_dsts_of(ctx, ready_dst)
-      for i, dst in ipairs(my_dsts) do
-        table.insert(ready_dsts, {dst, ready_dst})
+      dlog('run_program', ready_dst, ' unrolled_values=', unrolled_values)
+
+      -- simple case: I wasn't unrolled. just schedule my successors.
+      if not unrolled_values then
+        local my_dsts = find_all_dsts_of(ctx, rolled_dst)
+        dlog('run_program', ready_dst, ' my_dsts=', my_dsts)
+        local ready_to_run = function(x)
+        end
+        for i, my_dst in ipairs(my_dsts) do
+          if ready_to_run(my_dst) then
+            dlog('run_program', ready_dst, ' scheduling dst=', my_dst)
+            table.insert(ready_dsts, {my_dst, rolled_dst, 1})
+          else
+            dlog('run_program', ready_dst, ' not all deps ready for dst=', my_dst)
+          end
+        end
+        dst_values[ready_dst] = dst_value
       end
-      if new_subroots then
+
+      --[[if new_subroots then
         for i, subrootinfo in ipairs(new_subroots) do
           local new_dst, new_dst_value = table.unpack(subrootinfo)
           dlog('run_program', 'new_dst=', new_dst, ' index=', find_any_index_of_dst(ctx, new_dst))
@@ -670,7 +700,7 @@ function run_program(ctx, executor)
           table.insert(my_parsed_line.deps)
 
         end
-      end
+      end--]]
       dlog('run_program', ready_dst, ' done\n')
     end
   end
@@ -709,13 +739,12 @@ function test_executor(dst, src, other_values, ctx)
       table.insert(new_subroots, {subroot, v})
     end
     --]]
-    local new_subroots = {}
+    local unrolled_values = {}
     for i, v in ipairs(sitemaps) do
-      local new_subroot = 'sitemap_' .. i;
-      table.insert(new_subroots, {new_subroot, v})
+      table.insert(unrolled_values, v)
     end
 
-    return {}, new_subroots
+    return {}, unrolled_values
   end
 
   return nil
@@ -1031,7 +1060,7 @@ init: dofile 'crawl_sitemaps.lua'
 init: set_argv 'roots.txt' 'pages.txt'
 
 input root_sitemapstxt: argv(1)
-output allpages: write_as_lines_to_file argv(2) allpages
+output write_allpages: write_as_lines_to_file argv(2) allpages
 build root_sitemaps: lines_in_file root_sitemapstxt
 build allpages: new list
 
