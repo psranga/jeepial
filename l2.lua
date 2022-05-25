@@ -25,7 +25,7 @@ dofile('stdlib.lua')
 # endforeach
 --]]
 
-startkey = 'START'
+startdst = 'START'
 endkey = 'END'
 outputskey = 'OUTPUTS'
 
@@ -470,10 +470,11 @@ function update_deps(ctx)
 end
 
 -- returns the index of the parsed_line object from the table ctx.
-function find_node(ctx, nodename)
+-- or -1 if not found.
+function find_any_index_of_dst(ctx, needle_dst)
   for i, p in ipairs(ctx.parsed_lines) do
     for j, dst in ipairs(p.dsts) do
-      if nodename == dst then
+      if needle_dst == dst then
         return i
       end
     end
@@ -481,8 +482,255 @@ function find_node(ctx, nodename)
   return -1
 end
 
+function find_all_edges(ctx, needle_src, needle_dst)
+  local edges = {}
+  for i, p in ipairs(ctx.parsed_lines) do
+    for j, dst in ipairs(p.dsts) do
+      if dst == needle_dst then
+        for k, depinfo in ipairs(p.deps) do
+          local dep, linenum = table.unpack(depinfo)
+          if dep == needle_src then
+            table.insert(edges, {src, dst, p})
+          end
+        end
+      end
+    end
+  end
+  return edges
+end
+
+-- returns the parsed_line object, or nil if not found.
+function find_any_edge(ctx, needle_src, needle_dst)
+  local edges = find_all_edges(ctx, needle_src, needle_dst)
+  if #edges < 1 then return nil end
+  local src, dst, parsed_line = table.unpack(edges[1])
+  return parsed_line
+end
+
+function find_code_for_any_edge(ctx, needle_src, needle_dst)
+  local edges = find_all_edges(ctx, needle_src, needle_dst)
+  if #edges < 1 then return nil end
+  local src, dst, parsed_line = table.unpack(edges[1])
+  return parsed_line.code
+end
+
+function find_local_deps_for_any_edge(ctx, needle_src, needle_dst)
+  local edges = find_all_edges(ctx, needle_src, needle_dst)
+  if #edges < 1 then return nil end
+  local src, dst, parsed_line = table.unpack(edges[1])
+  return parsed_line.deps
+end
+
+function find_all_nodes(ctx)
+  local nodes = {}
+  for i, p in ipairs(ctx.parsed_lines) do
+    for j, dst in ipairs(p.dsts) do
+      nodes[dst] = 1
+      for k, depinfo in ipairs(p.deps) do
+        local dep, linenum = table.unpack(depinfo)
+        nodes[dep] = 1
+      end
+    end
+  end
+  return keys(nodes)
+end
+
+function find_all_deps_of(ctx, needle_dst)
+  local nodes = {}
+  for i, p in ipairs(ctx.parsed_lines) do
+    for j, dst in ipairs(p.dsts) do
+      if dst == needle_dst then
+        for k, depinfo in ipairs(p.deps) do
+          local dep, linenum = table.unpack(depinfo)
+          nodes[dep] = 1
+        end
+      end
+    end
+  end
+  return keys(nodes)
+end
+
+function find_all_dsts_of(ctx, needle_dep)
+  local nodes = {}
+  for i, p in ipairs(ctx.parsed_lines) do
+    for j, dst in ipairs(p.dsts) do
+      for k, depinfo in ipairs(p.deps) do
+        local dep, linenum = table.unpack(depinfo)
+        if dep == needle_dep then
+          nodes[dst] = 1
+        end
+      end
+    end
+  end
+  return keys(nodes)
+end
+
+function find_roots(ctx)
+  local dsts = find_all_nodes(ctx)
+  local roots = {}
+  for i, dst in ipairs(dsts) do
+    local all_deps = find_all_deps_of(ctx, dst)
+    if #all_deps == 0 then
+      roots[1+#roots] = dst
+    end
+  end
+  return roots
+end
+
+function find_sinks(ctx)
+  local dsts = find_all_nodes(ctx)
+  local sinks = {}
+  for i, dst in ipairs(dsts) do
+    local all_dsts = find_all_dsts_of(ctx, dst)
+    if #all_dsts == 0 then
+      sinks[1+#sinks] = dst
+    end
+  end
+  return sinks
+end
+
+function run_program(ctx, executor)
+  local roots = find_roots(ctx)
+  local sinks = find_sinks(ctx)
+  dlog('run_program', 'allnodes=', find_all_nodes(ctx))
+  dlog('run_program', 'roots=', roots)
+  dlog('run_program', 'sinks=', sinks)
+
+  local ready_dsts = {}
+  for i, dst in ipairs(roots) do
+    table.insert(ready_dsts, {dst, startdst}) -- src is unset == nil
+  end
+
+  dlog('\n')
+  local loopdet_dsts = {}
+  local dst_values = {} -- map
+
+  while #ready_dsts > 0 do
+    dlog('run_program', 'ready_dsts=', ready_dsts)
+    local ready_dst, src = table.unpack(table.remove(ready_dsts))
+    if loopdet_dsts[ready_dst] then
+      dlog('run_program', 'ignoring for this epoch. ready_dst=', ready_dst, '. already done or in progress')
+    else
+      loopdet_dsts[ready_dst] = 1
+      dlog('run_program', ready_dst, ' starting')
+
+      local dst_value, new_subroots = executor(ready_dst, src, dst_values)
+      dst_values[ready_dst] = dst_value
+
+      dlog('run_program', ready_dst, ' value=', dst_value)
+      dlog('run_program', ready_dst, ' new_subroots=', new_subroots)
+      dlog('run_program', ready_dst, ' my_dsts=', my_dsts)
+      local my_dsts = find_all_dsts_of(ctx, ready_dst)
+      for i, dst in ipairs(my_dsts) do
+        table.insert(ready_dsts, {dst, ready_dst})
+      end
+      if new_subroots then
+        for i, subrootinfo in ipairs(new_subroots) do
+          local new_dst, new_dst_value = table.unpack(subrootinfo)
+          dlog('run_program', 'new_dst=', new_dst, ' index=', find_any_index_of_dst(ctx, new_dst))
+
+          -- the proposed subtree's root can't already exist.
+          assert(find_any_index_of_dst(ctx, new_dst) < 0)
+          assert(dst_values[new_dst] == nil)
+
+          -- the subtree root is already evaluated. Mark it ready so its
+          -- successors can run.
+          table.insert(ready_dsts, {new_dst, ready_dst})
+          dst_values[new_dst] = new_dst_value
+          loopdet_dsts[new_dst] = 1
+
+          -- create unrolled parsed_line objects as if the user had unrolled.
+          -- basically clone the current ready_dst with the nodename renamed.
+
+          -- compute ready_dst's deps.
+          -- TODO: consider multiple edges ending here from same src?
+          local edges_ending_at_me = find_all_edges(ctx, src, ready_dst)
+          assert(#edges_ending_at_me == 1)
+
+          -- compute all forward arcs from here.
+          local next_level_edges = find_next_edges(ctx, src, ready_dst)
+          local mydsts = {}
+          for i, v in ipairs(next_level_edges) do
+            table.insert(mydsts, v[1]) -- it's a tuple of (src, dst, parsed_line)
+          end
+
+          -- my deps are the new node's deps are my deps.
+          local new_deps = mydeps
+          local new_linenum = save_parsed_line(ctx, 'unroll', {new_dst}, 'OPAQUE-UNROLL', new_deps)
+
+          local my_parsed_line = edges[3] -- it's a (src, dst, parsed_line) tuple.
+
+          -- add the subtree to the graph as if the input as unrolled ...
+          local new_code = find_code_for_any_edge(ctx, src, new_dst) or ''
+          local new_deps = find_local_deps_for_any_edge(ctx, src, new_dst) or {}
+          dlog('run_program', 'new_subroot', ' dst=', new_dst, ' code=', new_code, ' deps=', new_deps)
+          local new_linenum = save_parsed_line(ctx, 'unroll', {new_dst}, new_code, new_deps)
+
+          -- ... then add me as the subtree's root as 
+          table.insert(my_parsed_line.deps)
+
+        end
+      end
+      dlog('run_program', ready_dst, ' done\n')
+    end
+  end
+
+  return ctx
+end
+
+function test_executor(dst, src, other_values, ctx)
+  dlog('test_executor', 'dst=', dst, ' src=', src)
+  if dst == "root_sitemapstxt" then
+    return "root_sitemaps.txt", {}
+  end
+  if dst == "root_sitemaps" then
+    return {'1.sitemap', '2.sitemap', '3.sitemap'}, {}
+  end
+
+  if dst == 'sitemap' then
+    -- 'pbuild sitemap: unpack root_sitemaps'
+    assert(src == 'root_sitemaps')
+
+    local sitemaps = other_values[src] -- will be the list from the previous step.
+
+    -- clone the 'sitemap' node once for each sitemap with a unique name.
+    --[[
+    local new_subroots = {}
+    for i, v in ipairs(sitemaps) do
+      local edges = find_all_edges(ctx, src, dst)
+      assert(#edges == 1)
+
+      local code = find_code_for_any_edge(ctx, src, dst) or ''
+      local deps = find_local_deps_for_any_edge(ctx, src, dst) or {}
+      dlog('test_executor', 'sitemap', ' code=', code, ' deps=', deps)
+
+      local subroot = 'sitemap_' .. i;
+      save_parsed_line(ctx, 'unroll', {subroot}, code, deps)
+      table.insert(new_subroots, {subroot, v})
+    end
+    --]]
+    local new_subroots = {}
+    for i, v in ipairs(sitemaps) do
+      local new_subroot = 'sitemap_' .. i;
+      table.insert(new_subroots, {new_subroot, v})
+    end
+
+    return {}, new_subroots
+  end
+
+  return nil
+end
+
+function make_test_executor(ctx)
+  local executor = function(dst, src, other_values)
+    return test_executor(dst, src, other_values, ctx)
+  end
+
+  return executor
+end
+
 -- All info needed by runnable_code is needed here. But not anything more.
-function topo_sort(ctx)
+function topo_sort_unused(ctx)
 
   function all_nodes(ctx)
     local nodes = {}
@@ -578,14 +826,14 @@ function save_parsed_line(ctx, operation, dsts, code, deps)
   local linenum = 1+#parsed_lines
   local t = {cmd = operation, operation = operation, dsts = dsts, code = code, deps = deps}
   parsed_lines[1+#parsed_lines] = t
-  return t
+  return #parsed_lines
 end
 
 -- input root_sitemapstxt: argv(1)
 -- input <identifier>: code
 --     l2rtl.input(identifier, code)
 function compile_input(ctx, line)
-  dlog('compile_input', line)
+  dlog('compile_step', line)
   local parts = split(line, '%s+')
   local dst = string.sub(parts[2], 1, -2) -- remove the trailing colon
   local code = parts[3]
@@ -595,7 +843,7 @@ end
 -- output <identifier>: code
 --     l2rtl.output(identifier, code)
 function compile_output(ctx, line)
-  dlog('compile_output', line)
+  dlog('compile_step', line)
   local parts = split(line, '%s+')
   local dst = string.sub(parts[2], 1, -2) -- remove the trailing colon
   local code = join(parts, ' ', 3, #parts)
@@ -805,14 +1053,16 @@ pbuild page: unpack pages
 update allpages: append page
 ]]
 
+dlog_disable('update_deps', 'compile_l2', 'compile_step')
+
 print('--[[')
 local ctx = compile_l2(s)
 -- split rule into words and for each word look in the symtab for whether it is a dep.
 update_deps(ctx)
-topo_sort(ctx)
 --print(graph_to_str(g))
 print('--]]')
 print(runnable_code(ctx))
+run_program(ctx, make_test_executor(ctx))
 -- print(write_graph(ctx))
 
 --[[
