@@ -69,7 +69,33 @@ end
 function list_to_str(x)
   if #x == 0 then return '[]' end
   local s = ''
-  return '["' .. join(x, '", "') .. '"]'
+  if #x > 1 and #x <= 4 then
+    s = s .. '('
+  else
+    s = s .. '['
+  end
+
+  for i, v in ipairs(x) do
+    local v_str
+    if i > 1 then s = s .. ', ' end
+    if type(v) == 'table' then
+      if is_seq(v) then
+        v_str = list_to_str(v)
+      else
+        v_str = map_to_str(v)
+      end
+    else
+      v_str = v
+    end
+    s = s .. v_str
+  end
+
+  if #x > 1 and #x <= 4 then
+    s = s .. ')'
+  else
+    s = s .. ']'
+  end
+  return s
 end
 
 function map_to_str(x)
@@ -174,7 +200,8 @@ end
 
 stdlib = {
   scer = string_copy_excluding_ranges,
-  fesp = find_embedded_string_positions
+  fesp = find_embedded_string_positions,
+  disabled_dlog_sections = {} -- string keys
 }
 
 -- a,b,c -> [a, b, c]
@@ -245,6 +272,8 @@ function dlog_snippet(x)
 end
 
 function dlog(loc, ...)
+  if stdlib.disabled_dlog_sections[loc] then return end
+
   io.write('DLOG ', loc, ': ')
   for i = 1, select('#', ...) do
     -- if i > 1 then io.write(', ') end
@@ -254,6 +283,21 @@ function dlog(loc, ...)
   io.write('\n')
 end
 
+function dlog_disable(section, ...)
+  stdlib.disabled_dlog_sections[section] = 1
+  for i = 1, select('#', ...) do
+    local s = select(i, ...)
+    stdlib.disabled_dlog_sections[s] = 1
+  end
+end
+
+function rep(s, n)
+  local r = ''
+  for i = 1, n do
+    r = r .. s
+  end
+  return r
+end
 -- remove leading and trailing space.
 -- use gsub
 function trim(s)
