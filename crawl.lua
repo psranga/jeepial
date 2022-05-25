@@ -388,7 +388,7 @@ function main ()
   print('/*')
   print(graph_to_str(g))
   print('*/')
-  print(graph_to_dot_detailed(g, true))
+  print(graph_to_dot_detailed(g, false))
 end
 
 main()
