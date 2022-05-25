@@ -621,6 +621,7 @@ function run_program(ctx, executor)
   local loopdet_dsts = {}
   local dst_values = {} -- map
 
+  -- FIX THIS: use the linenum as the unit of execution.
   while #ready_dsts > 0 do
     dlog('run_program', 'ready_dsts=', ready_dsts)
     local rolled_dst, src, unroll_nonce = table.unpack(table.remove(ready_dsts, 1))
