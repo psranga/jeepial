@@ -1,0 +1,28 @@
+init: dofile 'stdlib.lua'
+init: dofile 'l2rtl.lua'
+init: dofile 'crawl_sitemaps.lua'
+init: set_argv 'roots.txt' 'pages.txt'
+
+input root_sitemapstxt: argv(1)
+output write_allpages: write_as_lines_to_file argv(2) allpages
+
+build root_sitemaps: lines_in_file root_sitemapstxt
+
+#build queue: new list
+#build allpages: new list
+
+pbuild sitemap: unpack root_sitemaps
+update queue: append (sitemap, 1)
+
+goto END: if queue.length <= 0
+build url, level: queue.pop()
+goto END: if level > 3
+
+build xml: wget url
+build pages, indexes: process_one_sitemap xml
+
+pbuild index: unpack indexes
+update queue: append {index, level+1}
+
+pbuild page: unpack pages
+update allpages: append page

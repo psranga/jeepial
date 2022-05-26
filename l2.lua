@@ -331,7 +331,7 @@ function funcall_snippet(arg)
   if type(arg) == 'number' then
     code = arg
   elseif type(arg) == 'string' then
-    code = '\'' .. arg .. '\''
+    code = '[[' .. arg .. ']]'
   elseif type(arg) == 'table' then
     local subargs = map(arg, funcall_snippet)
     code = '{' .. join(subargs, ', ') .. '}'
@@ -347,7 +347,7 @@ function parsed_line_to_code2(p)
   return code
 end
 
-function parsed_line_to_code(p)
+function parsed_line_to_code3(p)
   local funcname = p.operation
   if funcname == 'goto' then
     funcname = 'ggoto'
@@ -356,15 +356,44 @@ function parsed_line_to_code(p)
   return code
 end
 
-function runnable_code(ctx)
-  -- local r = 'local l2rtl = require(\'l2rtl\')\ng = l2rtl.new_program()\n'
-  local r = 'dofile(\'l2rtl.lua\')\ng = l2rtl.new_program()\n'
-  local code = ctx.code
-  for i, s in ipairs(map(ctx.parsed_lines, parsed_line_to_code)) do
-    r = r .. s .. '\n'
+function parsed_line_for_runlua(p)
+  local funcname = p.operation
+  if funcname == 'goto' then
+    funcname = 'ggoto'
   end
-  r = r .. 'l2rtl.run(g)\n'
+  local deps_without_linenums = {}
+  local linenum
+  for i, v in ipairs(p.deps) do
+    table.insert(deps_without_linenums, v[1])
+    linenum = v[2]
+  end
+  local code = '  {linenum=' .. linenum .. ', operation=\'' .. funcname .. '\',\n'
+  code = code .. '  code=' .. funcall_snippet(p.code) .. ',\n'
+  code = code .. '  dsts=' .. funcall_snippet(p.dsts) .. ', deps=' .. funcall_snippet(deps_without_linenums) .. '}'
+  return code
+end
+
+function parsed_line_to_source(p)
+  return p.operation .. ' ' .. join(p.dsts, ', ') .. ': ' .. p.code
+end
+
+function parsed_lines_to_str(ctx, parsed_line_to_code_fn)
+  -- local r = 'local l2rtl = require(\'l2rtl\')\ng = l2rtl.new_program()\n'
+  local r = ''
+  r = r .. 'dofile(\'run.lua\')\ng = {lines={\n'
+  local code = ctx.code
+  local lines = map(ctx.parsed_lines, parsed_line_to_code_fn)
+  for i, s in ipairs(lines) do
+    if i < #lines then s = s .. ',' end
+    r = r .. s;
+    if i < #lines then r = r .. '\n\n' end
+  end
+  r = r .. '\n}}\nrun_program(g)\n'
   return r
+end
+
+function runnable_code(ctx)
+  return parsed_lines_to_str(ctx, parsed_line_for_runlua)
 end
 
 -- <function> <arg> <arg> <arg>
@@ -393,7 +422,7 @@ function write_graph(ctx, detailed)
     for i2, dst in ipairs(p.dsts) do
       for i3, dep_info in ipairs(p.deps) do
         local dep, dep_linenum = table.unpack(dep_info)
-        local edge_label = ctx.parsed_lines[dep_linenum].cmd
+        local edge_label = dep_linenum .. '/' .. ctx.parsed_lines[dep_linenum].cmd
         s = s .. dep .. ' -> ' .. dst .. ' [label = "' .. edge_label .. '"] ;\n'
         --[[if detailed then
           s = s .. dep .. ' -> ' .. dst .. ' [label = "' .. edge_label .. '"] ;\n'
@@ -915,6 +944,7 @@ function compile_line(ctx, line)
   if startswith(line, 'pbuild ') then return compile_step('pbuild', ctx, line) end
   if startswith(line, 'update ') then return compile_step('update', ctx, line) end
   if startswith(line, 'goto ') then return compile_step('goto', ctx, line) end
+  if startswith(line, 'precondition ') then return compile_step('precondition', ctx, line) end
   dlog('compile_line', 'Ignoring line: ', line)
 end
 
@@ -927,7 +957,9 @@ function compile_l2(buf)
   local ctx = {symtab = {}, dsts = {}, code = {}, parsed_lines = {}}
   local code = ctx.code
   for i, s in ipairs(lines) do
-    if not (s == '') then
+    if (s == '') or (s[1] == '#') then
+      dlog('compile_l2', 'Ignoring: ', s)
+    else
       code[1+#code] = compile_line(ctx, s)
     end
   end
@@ -1011,93 +1043,89 @@ function main ()
   print(graph_to_dot_detailed(g, true))
 end
 
-function test_l2_compile(buf)
-  local g = {}
-  io.input('l2rtl.lua')
-  local rtl = io.read('a')
+function test2()
+  local s = [[
+  init: dofile 'stdlib.lua'
+  init: dofile 'l2rtl.lua'
+  init: dofile 'crawl_sitemaps.lua'
+  init: set_argv 'roots.txt' 'pages.txt'
 
-  local code = compile_l2(buf)
+  input root_sitemapstxt: argv(1)
+  output write_allpages: write_as_lines_to_file argv(2) allpages
 
-  io.output("test1.lua")
-  io.write(rtl .. '\n' .. code)
+  -- build queue: new list
+  -- build allpages: new list
 
-  --local f = load(code)
-  --if f then f() else print('error in eval.') end
+  build root_sitemaps: lines_in_file root_sitemapstxt
+
+  pbuild sitemap: unpack root_sitemaps
+  update queue: append (sitemap, 1)
+
+  goto END: if queue.length <= 0
+  build url, level: queue.pop()
+  goto END: if level > 3
+
+  build xml: wget url
+  build pages, indexes: process_one_sitemap xml
+
+  pbuild index: unpack indexes
+  update queue: append {index, level+1}
+
+  pbuild page: unpack pages
+  update allpages: append page
+  ]]
+  s = join(map(split(s, '\n'), trim), '\n')
+  print(s)
+
+  --dlog_disable('update_deps', 'compile_l2', 'compile_step')
+
+  --print('--[[')
+  local ctx = compile_l2(s)
+  update_deps(ctx)
+  print('ok')
+  --print(graph_to_str(g))
+  --print('--]]')
+  print(runnable_code(ctx))
+  --run_program(ctx, make_test_executor(ctx))
+  -- print(write_graph(ctx))
 end
 
-local test1 = [[
-input root_sitemapstxt: argv(1)
-output allpages: write_as_lines_to_file argv(2) allpages
+function compile_stdin()
+  local buf = io.read('a')
 
-build root_sitemaps: lines_in_file root_sitemapstxt
-build allpages: new list
+  print('--[[')
+  local ctx = compile_l2(buf)
+  update_deps(ctx)
+  local code = runnable_code(ctx)
+  print('--]]')
+  io.write(code)
+end
 
-build queue: new list
-pbuild sitemap: unpack root_sitemaps
-update queue: append (sitemap, 1)
+function compile_args()
+  assert(arg[1] ~= nil)
+  assert(arg[2] ~= nil)
+  assert(arg[3] ~= nil)
 
-goto END: if queue.length <= 0
+  dlog_disable('update_deps', 'compile_l2', 'compile_step')
 
-build url, level: queue.pop()
-goto url, level: if level > 3
+  io.input(arg[1])
+  local buf = io.read('a')
 
-build xml: wget url
-build pages, indexes: process_one_sitemap xml
+  local ctx = compile_l2(buf)
+  update_deps(ctx)
 
-pbuild index: unpack indexes
-update queue: append {index, level+1}
+  io.output(arg[2])
+  local code = runnable_code(ctx)
+  io.write(code)
 
-pbuild page: unpack pages
-update allpages: append page
-
-]]
+  io.output(arg[3])
+  local debug_info = join(map(ctx.parsed_lines, function (x, i) return '-- ' .. i .. ' ' .. parsed_line_to_source(x) end), '\n')
+  io.write('/* ', debug_info, ' */\n')
+  io.write(write_graph(ctx))
+end
 
 -- main()
 -- test_l2_compile()
-local s = [[
-init: dofile 'stdlib.lua'
-init: dofile 'l2rtl.lua'
-init: dofile 'crawl_sitemaps.lua'
-init: set_argv 'roots.txt' 'pages.txt'
-
-input root_sitemapstxt: argv(1)
-output write_allpages: write_as_lines_to_file argv(2) allpages
-build root_sitemaps: lines_in_file root_sitemapstxt
-build allpages: new list
-
-build queue: new list
-pbuild sitemap: unpack root_sitemaps
-update queue: append (sitemap, 1)
-
-goto END: if queue.length <= 0
-build url, level: queue.pop()
-goto END: if level > 3
-
-build xml: wget url
-build pages, indexes: process_one_sitemap xml
-
-pbuild index: unpack indexes
-update queue: append {index, level+1}
-
-pbuild page: unpack pages
-update allpages: append page
-]]
-
-dlog_disable('update_deps', 'compile_l2', 'compile_step')
-
-print('--[[')
-local ctx = compile_l2(s)
--- split rule into words and for each word look in the symtab for whether it is a dep.
-update_deps(ctx)
---print(graph_to_str(g))
-print('--]]')
-print(runnable_code(ctx))
-run_program(ctx, make_test_executor(ctx))
--- print(write_graph(ctx))
-
---[[
-local x = split('ab  cdxx ef', '%s+')
-for i, s in ipairs(x) do
-  print(s)
-end
---]]
+--test2()
+-- compile_stdin()
+compile_args()

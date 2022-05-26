@@ -1,0 +1,23 @@
+init: dofile ('stdlib.lua')
+init: dofile ('l2rtl.lua')
+init: dofile ('crawl_sitemaps.lua')
+init: set_argv ('roots.txt', 'pages.txt')
+
+input root_sitemapstxt: argv(1)
+output write_allpages: write_as_lines_to_file ( argv(2) , allpages )
+
+build root_sitemaps: lines_in_file ( root_sitemapstxt )
+input level: constant( 0 )
+
+pbuild url: unpack ( root_sitemaps )
+
+precondition xml: if ( level <= 2 )
+build xml, level: wget ( url ) ; incr ( level )
+#update level: incr ( level )
+
+build pages, indexes: process_one_sitemap ( xml )
+
+pbuild url: unpack ( indexes )
+
+pbuild page: unpack ( pages )
+update allpages: append ( page )

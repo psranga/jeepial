@@ -66,6 +66,24 @@ function is_list(t)
   return is_seq(t)
 end
 
+function obj_to_str(v)
+  local v_str = v
+  if type(v) == 'table' then
+    if is_seq(v) then
+      v_str = list_to_str(v)
+    else
+      v_str = map_to_str(v)
+    end
+  end
+  if type(v) == 'function' then
+    v_str = '<function>'
+  end
+  if type(v) == 'boolean' then
+    if v == true then v_str = 'true' else v_str = 'false' end
+  end
+  return v_str
+end
+
 function list_to_str(x)
   if #x == 0 then return '[]' end
   local s = ''
@@ -76,17 +94,8 @@ function list_to_str(x)
   end
 
   for i, v in ipairs(x) do
-    local v_str
     if i > 1 then s = s .. ', ' end
-    if type(v) == 'table' then
-      if is_seq(v) then
-        v_str = list_to_str(v)
-      else
-        v_str = map_to_str(v)
-      end
-    else
-      v_str = v
-    end
+    local v_str = obj_to_str(v)
     s = s .. v_str
   end
 
@@ -103,11 +112,7 @@ function map_to_str(x)
   local n = 1
   for k, v in pairs(x) do
     if n > 1 then s = s .. ', ' end
-    if is_seq(v) then
-      v_str = list_to_str(v)
-    else
-      v_str = v
-    end
+    local v_str = obj_to_str(v)
     s = s .. k .. '=' .. v_str
     n = n + 1
   end
@@ -230,6 +235,21 @@ function splitfn(pattern)
   return f
 end
 
+-- bind_back(f, a, b, c)(e, f, g) = f(e, f, g, a, b, c)
+function bind_back(f, ...)
+  local args = table.pack(...)
+  local r = function(...) return f(..., table.unpack(args)) end
+  return r
+end
+
+-- bind_front(f, a, b, c)(e, f, g) = f(a, b, c, e, f, g)
+function bind_front(f, ...)
+  local args = table.pack(...)
+  local r = function(...) return f(table.unpack(args), ...) end
+  return r
+end
+
+--[[
 -- bindafter(f, a, b, c)(e, f, g) = f(e, f, g, a, b, c)
 function bindafter(f, ...)
   local args = table.pack(...)
@@ -243,6 +263,7 @@ function bindbefore(f, ...)
   local r = function(...) return f(table.unpack(args), ...) end
   return r
 end
+--]]
 
 function join(l, sep, starti, endi)
   local s = ''
@@ -271,16 +292,25 @@ function dlog_snippet(x)
   return x
 end
 
-function dlog(loc, ...)
+function dlogue(loc, level, ...)
   if stdlib.disabled_dlog_sections[loc] then return end
 
-  io.write('DLOG ', loc, ': ')
+  local loc_str = loc
+  if type(loc) == 'table' then
+    loc_str = join(loc, '.')
+  end
+
+  io.write('dlog', level, ' ', loc, ': ')
   for i = 1, select('#', ...) do
     -- if i > 1 then io.write(', ') end
     local arg = select(i, ...)
     io.write(dlog_snippet(arg))
   end
   io.write('\n')
+end
+
+function dlog(loc, ...)
+  dlogue(loc, 1, ...)
 end
 
 function dlog_disable(section, ...)
@@ -337,10 +367,10 @@ end
 function filter(l, f, ...)
   local o = {}
   for i, v in ipairs(l) do
-    local ok = f(v)
-    for i = 1, select('#', ...) do
-      local g = select(i, ...)
-      ok = ok and g(v) -- short-circuiting
+    local ok = f(v, i)
+    for j = 1, select('#', ...) do
+      local g = select(j, ...)
+      ok = ok and g(v, i) -- short-circuiting
     end
     if ok then
       o[1+#o] = v
@@ -354,9 +384,9 @@ function filter_anytrue(l, f, ...)
   local o = {}
   for i, v in ipairs(l) do
     local ok = f(v)
-    for i = 1, select('#', ...) do
-      local g = select(i, ...)
-      ok = ok or g(v) -- short-circuiting
+    for j = 1, select('#', ...) do
+      local g = select(j, ...)
+      ok = ok or g(v, i) -- short-circuiting
     end
     if ok then
       o[1+#o] = v
@@ -370,10 +400,10 @@ end
 function map(l, f, ...)
   local o = {}
   for i, v in ipairs(l) do
-    local t = f(v)
-    for i = 1, select('#', ...) do
-      local g = select(i, ...)
-      t = g(t)
+    local t = f(v, i)
+    for j = 1, select('#', ...) do
+      local g = select(j, ...)
+      t = g(t, i)
     end
     o[1+#o] = t
   end
@@ -392,6 +422,36 @@ function compose(x, f, ...)
     o = g(o)
   end
   return o
+end
+
+-- Same as the previous but the function object to be operated upon is
+-- the *LAST* argument. The function declaration is written as below
+-- for documentation purposes ('x' is by convention the name of the
+-- object to be acted upon).
+--
+-- In the code itself, we rely on dynamic typing to finally use the
+-- last argument as 'x'. But we need a minium of one function and one
+-- object i.e., a minimum of two arguments.
+function compose2(f, x, ...)
+  assert(f ~= nil)
+  assert(x ~= nil)
+
+  if (f == nil) or (x == nil) then
+    return nil
+  end
+
+  local args = {f, x}
+  for i = 1, select('#', ...) do
+    local g = select(i, ...)
+    assert(g ~= nil)
+    if g == nil then
+      return nil
+    end
+    table.insert(args, g)
+  end
+
+  local obj = table.remove(args)
+  return compose(obj, table.unpack(args))
 end
 
 function list_max(l)
