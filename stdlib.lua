@@ -313,6 +313,18 @@ function dlog(loc, ...)
   dlogue(loc, 1, ...)
 end
 
+function dlog6(loc, ...)
+  dlogue(loc, 6, ...)
+end
+
+function dlog4(loc, ...)
+  dlogue(loc, 4, ...)
+end
+
+function dlog2(loc, ...)
+  dlogue(loc, 2, ...)
+end
+
 function dlog_disable(section, ...)
   stdlib.disabled_dlog_sections[section] = 1
   for i = 1, select('#', ...) do
@@ -364,15 +376,31 @@ end
 --]]
 
 -- functions are applied from left to right with short-circuiting (f first).
+function filter_table(l, f, ...)
+  local o = {}
+  for k, v in pairs(l) do
+    local ok = f(v, k)
+    for j = 1, select('#', ...) do
+      local g = select(j, ...)
+      ok = (ok == true) and g(v, k) -- short-circuiting
+    end
+    if ok == true then
+      o[k] = v
+    end
+  end
+  return o
+end
+
+-- functions are applied from left to right with short-circuiting (f first).
 function filter(l, f, ...)
   local o = {}
   for i, v in ipairs(l) do
     local ok = f(v, i)
     for j = 1, select('#', ...) do
       local g = select(j, ...)
-      ok = ok and g(v, i) -- short-circuiting
+      ok = (ok == true) and g(v, i) -- short-circuiting
     end
-    if ok then
+    if ok == true then
       o[1+#o] = v
     end
   end
@@ -388,7 +416,7 @@ function filter_anytrue(l, f, ...)
       local g = select(j, ...)
       ok = ok or g(v, i) -- short-circuiting
     end
-    if ok then
+    if ok == true then
       o[1+#o] = v
     end
   end

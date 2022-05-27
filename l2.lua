@@ -505,6 +505,70 @@ function update_deps(ctx)
   return ctx
 end
 
+function is_system_dst(ctx, dst)
+  if dst == endkey then return true end
+  return false
+end
+
+function is_operation_renaming_immune(parsed_line)
+  if parsed_line.operation == 'precondition' then return true end
+  return false
+end
+
+function rename_dsts(ctx)
+  local rename_infos = find_dsts_to_be_renamed(ctx) -- [(dst, newname, linenum)]
+  for i, rename_info in ipairs(rename_infos) do
+    local dst_to_be_renamed, new_name, linenum = table.unpack(rename_info)
+    local p = ctx.parsed_lines[linenum]
+
+    local renamed_dsts = {}
+    for j, dst in ipairs(p.dsts) do
+      if dst == dst_to_be_renamed then
+        table.insert(renamed_dsts, new_name)
+      else
+        table.insert(renamed_dsts, dst)
+      end
+    end
+
+    local orig = p.dsts
+    p.dsts = renamed_dsts
+    dlog('renamed_dsts', 'line ', linenum, ' new dsts: ', renamed_dsts, ' orig: ', orig)
+  end
+end
+
+function find_dsts_to_be_renamed(ctx)
+  -- if a dst has more than more inedge, then rename the second and subsequent occurrences.
+  local dst_to_first_linenum = {}
+  local dst_to_num_writes = {}
+  local rename_infos = {}
+
+  for i, p in ipairs(ctx.parsed_lines) do
+    for j, dst in ipairs(p.dsts) do
+      if is_system_dst(ctx, dst) then
+        dlog6('find_dsts_to_be_renamed', 'ignoring system dst: ', dst)
+      elseif is_operation_renaming_immune(p) then
+        dlog2('find_dsts_to_be_renamed', 'ignoring renaming dst: ', dst, ' for renaming-immune operation: ', parsed_line_to_source(p))
+      else
+        if not dst_to_first_linenum[dst] then
+          dst_to_first_linenum[dst] = i
+        end
+        if not dst_to_num_writes[dst] then
+          dst_to_num_writes[dst] = 1
+        else
+          dst_to_num_writes[dst] = dst_to_num_writes[dst] + 1
+          local new_name = dst .. dst_to_num_writes[dst]
+          dlog2('find_dsts_to_be_renamed', 'renaming line ', i, ' dsts. dst: ', dst, ' -> ', new_name, ' ', parsed_line_to_source(p))
+          table.insert(rename_infos, {dst, new_name, i})
+        end
+      end
+    end
+  end
+  dlog4('find_dsts_to_be_renamed', 'dst_to_first_linenum: ', dst_to_first_linenum)
+  dlog4('find_dsts_to_be_renamed', 'dst w/ multiple writes: ', filter_table(dst_to_num_writes, function(x) return x > 1 end))
+  dlog2('find_dsts_to_be_renamed', 'need renaming: ', rename_infos)
+  return rename_infos
+end
+
 -- returns the index of the parsed_line object from the table ctx.
 -- or -1 if not found.
 function find_any_index_of_dst(ctx, needle_dst)
@@ -1101,27 +1165,47 @@ function compile_stdin()
   io.write(code)
 end
 
+function program_for_dlog(ctx)
+  local debug_info = join(map(ctx.parsed_lines, function (x, i) return '-- ' .. i .. ' ' .. parsed_line_to_source(x) end), '\n')
+  return debug_info
+end
+
+function write_graph_to_file(fn, ctx)
+  local fh = io.open(fn, 'w+')
+  local debug_info = program_for_dlog(ctx) -- join(map(ctx.parsed_lines, function (x, i) return '-- ' .. i .. ' ' .. parsed_line_to_source(x) end), '\n')
+  fh:write('/* ', debug_info, ' */\n')
+  fh:write(write_graph(ctx))
+  fh:close()
+end
+
 function compile_args()
   assert(arg[1] ~= nil)
   assert(arg[2] ~= nil)
   assert(arg[3] ~= nil)
+  assert(arg[4] ~= nil)
 
-  dlog_disable('update_deps', 'compile_l2', 'compile_step')
+  dlog_disable('update_deps', 'compile_l2', 'compile_step', 'find_dsts_to_be_renamed')
 
   io.input(arg[1])
   local buf = io.read('a')
 
   local ctx = compile_l2(buf)
+  update_deps(ctx)  -- just in case: so dsts is known-good.
+  write_graph_to_file(arg[4], ctx) -- dump graph before renaming for debugging
+
+  rename_dsts(ctx)
   update_deps(ctx)
+  write_graph_to_file(arg[3], ctx)
+
+  dlog2('main', 'checking renaming.')
+  local rename_infos = find_dsts_to_be_renamed(ctx)  -- should not see any candidates
+  dlog2('main', 'second pass rename_infos: ', rename_infos)
+  assert(#rename_infos == 0)
 
   io.output(arg[2])
   local code = runnable_code(ctx)
+  io.write(program_for_dlog(ctx), '\n')
   io.write(code)
-
-  io.output(arg[3])
-  local debug_info = join(map(ctx.parsed_lines, function (x, i) return '-- ' .. i .. ' ' .. parsed_line_to_source(x) end), '\n')
-  io.write('/* ', debug_info, ' */\n')
-  io.write(write_graph(ctx))
 end
 
 -- main()
