@@ -22,6 +22,7 @@ function keys(t)
   for k, v in pairs(t) do
     r[1+#r] = k
   end
+  table.sort(r)
   return r
 end
 
@@ -49,17 +50,25 @@ function startswith(s, pattern)
   return i == 1
 end
 
+--[[
 function is_seq(t)
-  local is_list = true
   local keys = {}
   local i = 0
   for k, v in pairs(t) do
     i = i + 1
     local is_num_key = (type(k) == 'number')
-    if not is_num_key then return false end  -- all numeric keys
-    if not (k ==  i) then return false end  -- no holes
+    if not is_num_key then return nil end  -- all numeric keys
+    if not (k == i) then return nil end  -- no holes
   end
-  return true
+  return 1
+end
+--]]
+function is_seq(t)
+  local n = 0
+  for k, v in pairs(t) do
+    n = n + 1
+  end
+  return #t == n  -- no other keys except those in table's "array view".
 end
 
 function is_list(t)
@@ -293,7 +302,8 @@ function dlog_snippet(x)
 end
 
 function dlogue(loc, level, ...)
-  if stdlib.disabled_dlog_sections[loc] then return end
+  if stdlib.disabled_dlog_sections[loc] == 1 then return end
+  if stdlib.disabled_dlog_sections['*'] == 1 then return end
 
   local loc_str = loc
   if type(loc) == 'table' then
@@ -314,15 +324,107 @@ function dlog(loc, ...)
 end
 
 function dlog6(loc, ...)
-  dlogue(loc, 6, ...)
+  dlogue(loc, 6, rep('  ', 3), ...)
 end
 
 function dlog4(loc, ...)
-  dlogue(loc, 4, ...)
+  dlogue(loc, 4, rep('  ', 2), ...)
 end
 
 function dlog2(loc, ...)
-  dlogue(loc, 2, ...)
+  dlogue(loc, 2, rep('  ', 1), ...)
+end
+
+function dlogue_lines(loc, level, title, lines)
+  if stdlib.disabled_dlog_sections[loc] == 1 then return end
+  if stdlib.disabled_dlog_sections['*'] == 1 then return end
+
+  local loc_str = loc
+  if type(loc) == 'table' then
+    loc_str = join(loc, '.')
+  end
+
+  local s = 'llog' .. level .. ' ' .. loc .. ': '
+  io.write(s, dlog_snippet(title), '\n')
+
+  assert(type(lines) == 'table')
+
+  if is_seq(lines) then
+    for i = 1, #lines do
+      io.write(rep(' ', #s), ' ', rep(' ', 1+math.floor(level/2)))
+      io.write(i, '. ', dlog_snippet(lines[i]))
+      io.write('\n')
+    end
+  else
+    local i = 0
+    for k, v in pairs(lines) do
+      i = i + 1
+      io.write(rep(' ', #s), ' ', rep(' ', 1+math.floor(level/2)))
+      io.write('+ ', dlog_snippet(k), ' -> ', dlog_snippet(v))
+      io.write('\n')
+    end
+  end
+  -- io.write('\n')
+end
+
+--[[
+function dlogue_lines(loc, level, title, ...)
+  if stdlib.disabled_dlog_sections[loc] then return end
+
+  local loc_str = loc
+  if type(loc) == 'table' then
+    loc_str = join(loc, '.')
+  end
+
+  local args = {}
+  for i = 1, select('#', ...) do
+    local arg = select(i, ...)
+    table.insert(args, arg)
+  end
+
+  local s = 'llog' .. level .. ' ' .. loc .. ': '
+  io.write(s, dlog_snippet(title), '\n')
+
+  for i = 1, #args do
+    io.write(rep(' ', #s), ' ', rep(' ', 1+math.floor(level/2)))
+    io.write(i, '. ', dlog_snippet(args[i]))
+    io.write('\n')
+  end
+  -- io.write('\n')
+end
+--]]
+
+function dlog_lines(loc, ...)
+  dlogue_lines(loc, 1, ...)
+end
+
+function map_to_kv_pairs(t)
+  local r = {}
+  for k, v in pairs(t) do
+    table.insert(r, {k, v})
+  end
+  return r
+end
+
+-- r = m1 - m2
+function set_difference(m1, m2)
+  local r = {}
+  for k, v in pairs(m1) do
+    if not m2[k] then
+      table.insert(r, k)
+    end
+  end
+  return r
+end
+
+function list_difference(l1, l2)
+  local m1 = {}
+  local m2 = {}
+
+  for i, v in ipairs(l1) do m1[v] = 1 end
+  for i, v in ipairs(l2) do m2[v] = 1 end
+
+  return set_difference(m1, m2)
 end
 
 function dlog_disable(section, ...)
@@ -331,6 +433,30 @@ function dlog_disable(section, ...)
     local s = select(i, ...)
     stdlib.disabled_dlog_sections[s] = 1
   end
+end
+
+function dlog_enable(section, ...)
+  stdlib.disabled_dlog_sections[section] = 0
+  for i = 1, select('#', ...) do
+    local s = select(i, ...)
+    stdlib.disabled_dlog_sections[s] = 0
+  end
+end
+
+function dlogger(me, debug_level, ...)
+  local args = {}
+
+  assert(me ~= nil)
+  table.insert(args, me)
+
+  if debug_level ~= nil then table.insert(args, debug_level) end
+
+  for i = 1, select('#', ...) do
+    local s = select(i, ...)
+    table.insert(args, s)
+  end
+
+  return bind_front(dlog, table.unpack(args))
 end
 
 function rep(s, n)
@@ -374,6 +500,36 @@ function map(l, f)
   return o
 end
 --]]
+
+function list_sum(l)
+  local r = 0
+  for i, v in ipairs(l) do
+    r = r + v
+  end
+  return r
+end
+
+function list_uniq(l)
+  local r = {}
+  for i, v in ipairs(l) do
+    r[v] = 1
+  end
+  return keys(r)
+end
+
+-- functions are applied from left to right with short-circuiting (f first).
+function map_table(l, f, ...)
+  local o = {}
+  for k, v in pairs(l) do
+    local v2, k2 = f(v, k)
+    for j = 1, select('#', ...) do
+      local g = select(j, ...)
+      v2, k2 = g(v2, k)
+    end
+    o[k] = v2
+  end
+  return o
+end
 
 -- functions are applied from left to right with short-circuiting (f first).
 function filter_table(l, f, ...)
