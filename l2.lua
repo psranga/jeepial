@@ -515,6 +515,10 @@ function is_operation_renaming_immune(parsed_line)
   return false
 end
 
+function maybe_line_needs_renaming(p)
+  return not is_operation_renaming_immune(p)
+end
+
 function rename_dsts(ctx)
   local rename_infos = find_dsts_to_be_renamed(ctx) -- [(dst, newname, linenum)]
   for i, rename_info in ipairs(rename_infos) do
@@ -536,7 +540,7 @@ function rename_dsts(ctx)
   end
 end
 
-function find_dsts_to_be_renamed(ctx)
+function find_dsts_to_be_renamed_simple(ctx)
   -- if a dst has more than more inedge, then rename the second and subsequent occurrences.
   local dst_to_first_linenum = {}
   local dst_to_num_writes = {}
@@ -546,7 +550,7 @@ function find_dsts_to_be_renamed(ctx)
     for j, dst in ipairs(p.dsts) do
       if is_system_dst(ctx, dst) then
         dlog6('find_dsts_to_be_renamed', 'ignoring system dst: ', dst)
-      elseif is_operation_renaming_immune(p) then
+      elseif is_operation_renaming_immune(p) == true then
         dlog2('find_dsts_to_be_renamed', 'ignoring renaming dst: ', dst, ' for renaming-immune operation: ', parsed_line_to_source(p))
       else
         if not dst_to_first_linenum[dst] then
@@ -567,6 +571,213 @@ function find_dsts_to_be_renamed(ctx)
   dlog4('find_dsts_to_be_renamed', 'dst w/ multiple writes: ', filter_table(dst_to_num_writes, function(x) return x > 1 end))
   dlog2('find_dsts_to_be_renamed', 'need renaming: ', rename_infos)
   return rename_infos
+end
+
+function find_dsts_to_be_renamed_topo(ctx)
+  local unresolved_nodes, inedge_to_level, resolved_levels, node_levels =
+    topo_sort_symbolic(ctx)
+
+  local rename_infos = {} -- [(dst, newname, linenum, write_num)]
+
+  function make_rename_infos()
+    local me = 'has_loop'
+    dlog(me, 'unresolved nodes\' levels by inedge:')
+    local ok = true
+
+    for i, dst in ipairs(unresolved_nodes) do
+      local lines_written_from = {}
+      dlog(me, '  ', '* ', dst, ' (unresolved node)')
+      local srcs = find_all_deps_of(ctx, dst)
+      local loop_nums = {}
+      for j, src in ipairs(srcs) do
+        dlog(me, '    ', j, '. ', inedge_to_level[dst][src], ' via ', src)
+        local tsrc, offset = table.unpack(inedge_to_level[dst][src])
+        local has_loop_via_src = (tsrc == dst)
+
+        if has_loop_via_src then
+          local edges = find_all_edges(ctx, src, dst)
+          assert(#edges == 1)
+          local linenum_at_which_dst_should_be_renamed = edges[1][4]  -- it's a tuple
+
+          local k = tsrc .. '-linenum-' .. linenum_at_which_dst_should_be_renamed
+          if not loop_nums[k] then loop_nums[k] = 0 end
+          loop_nums[k] = loop_nums[k] + 1  -- uniquify w/ linenum
+
+          local new_name = dst .. '_from_' .. src
+          local rename_info = {dst, new_name, linenum_at_which_dst_should_be_renamed, loop_nums[src]}
+          table.insert(rename_infos, rename_info)
+        end
+      end
+
+      dlog(me, 'loop_nums=', loop_nums)
+      local num_loops = list_uniq(keys(loop_nums))
+
+      if #num_loops > 1 then
+        dlog(me, '  ', '! ', dst, ' loop expected: not found. num_loops=', num_loops)
+        ok = false
+      end
+    end
+    return ok
+  end
+
+  local ok = make_rename_infos()
+  dlog_lines('find_rename', 'rename_infos:', rename_infos)
+
+  assert(ok == true)
+
+  return rename_infos
+end
+
+function find_dsts_to_be_renamed(ctx)
+  return find_dsts_to_be_renamed_topo(ctx)
+end
+
+-- All info needed by runnable_code is needed here. But not anything more.
+function topo_sort_symbolic(ctx)
+  local roots = find_roots(ctx)
+  local inedge_to_level = {} -- dst,src -> (dep, offset)
+  local resolved_levels = {} -- dst -> (dep, offset)
+  local node_levels = {}  -- dst -> level
+  local me = 'sym_topo'
+  local exclude_preconditions_etc = maybe_line_needs_renaming
+
+  dlog(me, 'roots=', roots)
+  table.sort(roots)
+
+  local queue = {}  -- values are (dst, src)
+
+  assert(list_find(roots, startkey))
+  -- add all successors of roots to queue.
+  for i, dst in ipairs(roots) do
+    node_levels[dst] = 1
+    resolved_levels[dst] = {dst, 0}
+    local succs = find_all_dsts_of(ctx, dst)
+    dlog(me, 'Add root successors: ', succs)
+    for j, succ in ipairs(succs) do
+      table.insert(queue, {succ, dst})
+    end
+  end
+
+  function find_furthest_straight_line_predecessor(ctx, dst)
+    local me = 'find_furthest_pred'
+    --local dlog = function(...) return end
+    local mysrcs = find_all_deps_of(ctx, dst, exclude_preconditions_etc)
+    --dlog(me, 'dst=', dst, ' mysrcs=', mysrcs)
+    local r = nil
+
+    if #mysrcs == 0 then
+      -- i'm a root. by definition return myself.
+      r = {dst, 0}
+    elseif #mysrcs > 1 then
+      -- no straight line to my sources.
+      r = nil
+    else
+      assert(#mysrcs == 1)
+      local src = mysrcs[1]
+      local cand = find_furthest_straight_line_predecessor(ctx, src)
+      r = {src, 1}  -- one step away from my src
+      if cand ~= nil then
+        -- but rewrite from my src's predecessor if we found one.
+        r = {cand[1], 1 + cand[2]}
+      end
+    end
+
+    --dlog(me, 'dst=', dst, ' ret=', r)
+    return r
+  end
+
+  while #queue > 0 do
+    local dst, src = table.unpack(table.remove(queue, 1))
+    dlog2(me, 'doing "', dst, '" reached from "', src, '"')
+
+    -- should not have already done this edge.
+    assert(inedge_to_level[dst] == nil or inedge_to_level[dst][src] == nil)
+    if inedge_to_level[dst] == nil then inedge_to_level[dst] = {} end
+
+    local resolved_src_level = resolved_levels[src]
+    local mylevel = {src, 1}
+    local mysrcs = find_all_deps_of(ctx, dst, exclude_preconditions_etc)
+    local furthest_pred_level = find_furthest_straight_line_predecessor(ctx, src)
+    dlog4(me, 'src\'s furthest_pred_level=', furthest_pred_level)
+
+    -- if src is resolved, rewrite my level in terms of src.
+    if resolved_src_level then
+      dlog4(me, 'src=', src, ' is resolved: ', resolved_src_level)
+      local src_of_src, src_offset = table.unpack(resolved_src_level)
+      mylevel = {src_of_src, src_offset + 1}
+    elseif furthest_pred_level then
+      assert(furthest_pred_level[2] == 1 or furthest_pred_level[1] ~= src)
+      mylevel = {furthest_pred_level[1], 1 + furthest_pred_level[2]}
+    end
+
+    -- set my level for this in-edge.
+    inedge_to_level[dst][src] = mylevel
+    dlog4(me, 'edge_level[', dst, ', ', src, '] = ', mylevel)
+
+    -- if all inedges are resolved, resolve my *node* level.
+    local done_mysrcs = keys(inedge_to_level[dst])
+    if #done_mysrcs == #mysrcs then
+      local mylevels = values(inedge_to_level[dst])
+      local uniq_tsrcs = list_uniq(map(mylevels, function (x) return x[1] end))
+      -- all inedges have the same transitive src?
+      dlog4(me, '#uniq_tsrcs=', #uniq_tsrcs, ' uniq_tsrcs=', uniq_tsrcs, ' #mysrcs=', #mysrcs, ' #done_mysrcs=', #done_mysrcs)
+      if #uniq_tsrcs == 1 then
+        local resolved_tsrc = uniq_tsrcs[1]
+        local resolved_offset = list_max(map(mylevels, function (x) return x[2] end))
+        local resolved_level = {resolved_tsrc, resolved_offset}
+        dlog4(me, '* level[', dst, '] = ', resolved_level)
+        resolved_levels[dst] = resolved_level
+      end
+    end
+
+    --[[
+    if #mysrcs == 1 then -- and resolved_src_level then
+      dlog4(me, '* level[', dst, '] = ', mylevel)
+      resolved_levels[dst] = mylevel
+    else
+      local done_mysrcs = keys(inedge_to_level[dst])
+      if #done_mysrcs == #mysrcs then
+        local mylevels = values(inedge_to_level[dst])
+        local uniq_tsrcs = list_uniq(map(mylevels, function (x) return x[1] end))
+        -- all inedges have the same transitive src?
+        dlog4(me, '#uniq_tsrcs=', #uniq_tsrcs, ' uniq_tsrcs=', uniq_tsrcs, ' #mysrcs=', #mysrcs, ' #done_mysrcs=', #done_mysrcs)
+        if #uniq_tsrcs == 1 then
+          local resolved_tsrc = uniq_tsrcs[1]
+          local resolved_offset = list_max(map(mylevels, function (x) return x[2] end))
+          local resolved_level = {resolved_tsrc, resolved_offset}
+          dlog4(me, '* level[', dst, '] = ', resolved_level)
+          resolved_levels[dst] = resolved_level
+        end
+      end
+    end
+    --]]
+
+    local succs = find_all_dsts_of(ctx, dst, exclude_preconditions_etc)
+    dlog4(me, 'Adding successors: ', succs)
+    for j, succ in ipairs(succs) do
+      if inedge_to_level[succ] == nil or inedge_to_level[succ][dst] == nil then
+        local item = {succ, dst}
+        dlog6(me, 'Adding item: ', item)
+        table.insert(queue, item)
+      end
+    end
+  end
+
+  local resolved_nodes = keys(resolved_levels)
+  local unresolved_nodes = list_difference(find_all_nodes(ctx), resolved_nodes)
+  dlog_lines(me, 'resolved_nodes: ', resolved_nodes)
+  dlog_lines(me, 'unresolved_nodes: ', unresolved_nodes)
+  dlog_lines(me, 'resolved_levels:', resolved_levels)
+  
+  local roots_for_sym_levels = {}
+  for dst, v in pairs(inedge_to_level) do
+    for src, symlevel in pairs(v) do
+      roots_for_sym_levels[symlevel[1]] = 1
+    end
+  end
+  dlog(me, 'roots_for_sym_levels: ', keys(roots_for_sym_levels))
+
+  return unresolved_nodes, inedge_to_level, resolved_levels, node_levels
 end
 
 -- returns the index of the parsed_line object from the table ctx.
@@ -590,7 +801,7 @@ function find_all_edges(ctx, needle_src, needle_dst)
         for k, depinfo in ipairs(p.deps) do
           local dep, linenum = table.unpack(depinfo)
           if dep == needle_src then
-            table.insert(edges, {src, dst, p})
+            table.insert(edges, {dep, dst, p, linenum})
           end
         end
       end
@@ -603,21 +814,21 @@ end
 function find_any_edge(ctx, needle_src, needle_dst)
   local edges = find_all_edges(ctx, needle_src, needle_dst)
   if #edges < 1 then return nil end
-  local src, dst, parsed_line = table.unpack(edges[1])
+  local src, dst, parsed_line, linenum = table.unpack(edges[1])
   return parsed_line
 end
 
 function find_code_for_any_edge(ctx, needle_src, needle_dst)
   local edges = find_all_edges(ctx, needle_src, needle_dst)
   if #edges < 1 then return nil end
-  local src, dst, parsed_line = table.unpack(edges[1])
+  local src, dst, parsed_line, linenum = table.unpack(edges[1])
   return parsed_line.code
 end
 
 function find_local_deps_for_any_edge(ctx, needle_src, needle_dst)
   local edges = find_all_edges(ctx, needle_src, needle_dst)
   if #edges < 1 then return nil end
-  local src, dst, parsed_line = table.unpack(edges[1])
+  local src, dst, parsed_line, linenum = table.unpack(edges[1])
   return parsed_line.deps
 end
 
@@ -635,43 +846,12 @@ function find_all_nodes(ctx)
   return keys(nodes)
 end
 
-function find_all_deps_of(ctx, needle_dst)
-  local nodes = {}
-  for i, p in ipairs(ctx.parsed_lines) do
-    for j, dst in ipairs(p.dsts) do
-      if dst == needle_dst then
-        for k, depinfo in ipairs(p.deps) do
-          local dep, linenum = table.unpack(depinfo)
-          nodes[dep] = 1
-        end
-      end
-    end
-  end
-  return keys(nodes)
-end
-
-function find_all_dsts_of(ctx, needle_dep)
-  dlog('find_all_dsts_of', needle_dep)
-  local nodes = {}
-  for i, p in ipairs(ctx.parsed_lines) do
-    for j, dst in ipairs(p.dsts) do
-      for k, depinfo in ipairs(p.deps) do
-        local dep, linenum = table.unpack(depinfo)
-        if dep == needle_dep then
-          nodes[dst] = 1
-        end
-      end
-    end
-  end
-  return keys(nodes)
-end
-
 function find_roots(ctx)
   local dsts = find_all_nodes(ctx)
   local roots = {}
   for i, dst in ipairs(dsts) do
     local all_deps = find_all_deps_of(ctx, dst)
-    if (#all_deps == 0) or list_find(all_deps, startkey) then
+    if #all_deps == 0 then
       roots[1+#roots] = dst
     end
   end
@@ -690,6 +870,40 @@ function find_sinks(ctx)
   return sinks
 end
 
+function find_all_deps_of(ctx, needle_dst, line_filter)
+  local nodes = {}
+  for i, p in ipairs(ctx.parsed_lines) do
+    if (line_filter == nil) or (line_filter(p, i) == true) then
+      for j, dst in ipairs(p.dsts) do
+        if dst == needle_dst then
+          for k, depinfo in ipairs(p.deps) do
+            local dep, linenum = table.unpack(depinfo)
+            nodes[dep] = 1
+          end
+        end
+      end
+    end
+  end
+  return keys(nodes)
+end
+
+function find_all_dsts_of(ctx, needle_dep, line_filter)
+  local nodes = {}
+  for i, p in ipairs(ctx.parsed_lines) do
+    if (line_filter == nil) or (line_filter(p, i) == true) then
+      for j, dst in ipairs(p.dsts) do
+        for k, depinfo in ipairs(p.deps) do
+          local dep, linenum = table.unpack(depinfo)
+          if dep == needle_dep then
+            nodes[dst] = 1
+          end
+        end
+      end
+    end
+  end
+  return keys(nodes)
+end
+
 function gen_nonce(ctx)
   if not ctx.nonce then
     ctx.nonce = 0
@@ -698,6 +912,7 @@ function gen_nonce(ctx)
   return ctx.nonce
 end
 
+--[==[
 function run_program(ctx, executor)
   local roots = find_roots(ctx)
   local sinks = find_sinks(ctx)
@@ -943,6 +1158,7 @@ function topo_sort_unused(ctx)
   --]]
   return ctx
 end
+--]==]
 
 function save_parsed_line(ctx, operation, dsts, code, deps)
   local parsed_lines = ctx.parsed_lines
@@ -1184,7 +1400,7 @@ function compile_args()
   assert(arg[3] ~= nil)
   assert(arg[4] ~= nil)
 
-  dlog_disable('update_deps', 'compile_l2', 'compile_step', 'find_dsts_to_be_renamed')
+  dlog_disable('*', 'update_deps', 'compile_l2', 'compile_step', 'find_dsts_to_be_renamed')
 
   io.input(arg[1])
   local buf = io.read('a')
@@ -1208,8 +1424,21 @@ function compile_args()
   io.write(code)
 end
 
+function test_topo()
+  dlog_disable('update_deps', 'compile_l2', 'compile_step', 'find_dsts_to_be_renamed')
+  dlog_disable('is_seq')
+
+  io.input('pg2.txt')
+  local buf = io.read('a')
+
+  local ctx = compile_l2(buf)
+  update_deps(ctx)  -- just in case: so dsts is known-good.
+  rename_dsts(ctx)
+end
+
 -- main()
 -- test_l2_compile()
 --test2()
 -- compile_stdin()
 compile_args()
+-- test_topo()
