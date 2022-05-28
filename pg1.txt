@@ -8,6 +8,8 @@ output write_allpages: write_as_lines_to_file argv(2) allpages
 
 build root_sitemaps: lines_in_file root_sitemapstxt
 
+build level: constant( 0 )
+
 #build queue: new list
 #build allpages: new list
 
