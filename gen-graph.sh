@@ -14,4 +14,5 @@ dot -Tpdf $p.0.gv -o$p.0.pdf
 #grep '^-- ' $p.lua | a2ps --border=0 -B -l 40 -R -o- | ps2pdf - $p.ovl.pdf
 grep '^-- ' $p.lua | a2ps --border=0 -B --columns=1 -l 100 -R -o- | ps2ps -sPAPERSIZE=letter - - | ps2pdf - $p.ovl.pdf
 
-qpdf --overlay $p.ovl.pdf --repeat=1 -- --empty --pages $p.0.pdf $p.1.pdf -- >(pdftops -paper letter -expand - - | ps2pdf - $p.c.pdf)
+qpdf --overlay $p.ovl.pdf --repeat=1 -- --empty --pages $p.0.pdf $p.1.pdf -- >(pdftops -paper letter -expand - - | ps2pdf - $p.c.pdf) && \
+  rm $p.ovl.pdf
