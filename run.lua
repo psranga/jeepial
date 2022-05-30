@@ -222,6 +222,7 @@ function run_program(g)
   while true do
     pass_num = pass_num + 1
     dlog1(me, pass_num, ' Checking for ready lines.')
+    assert(pass_num < #g.lines)
 
     local ready_lines = find_ready_lines(g, built_values, {'output'})
     dlog1(me, 'ready_lines=', ready_lines)
