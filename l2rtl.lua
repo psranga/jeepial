@@ -1,134 +1,86 @@
-local sgl = require('sgl')
+-- functions like set_argv for the l2 sandbox.
 
-function main(g)
-end
+dofile('stdlib.lua')
 
-local args = {}
+l2args = {}
 
-function setargs(l)
-  args = l
+function set_argv(t)
+  assert(is_seq(t))
+  l2args = map(t, function(x) assert(type(x) == 'string'); return '' .. x end) -- coerce to string
 end
 
 function argv(i)
-  return argv[i]
+  assert(i >= 1 and i <= #l2args)
+  return l2args[i]
 end
 
-function write_as_lines_to_file ()
-end
-
-function new_program()
-end
-
-function init()
-end
-
-function input()
-end
-
-function output()
-end
-
-function ggoto()
-end
-
-function build()
-end
-
-function pbuild()
-end
-
-function update()
-end
-
-function run()
-end
-
-function new_debug()
-  return {}
-end
-
-function new_code()
-  return {}
-end
-
-function new_program()
-  -- local pg = {dsts = {}, deps = {}, code = new_code(), g = sgl.new_sg()}
-  local pg = {code_by_line = {}, g = sgl.new_sg(), debug_info = {}}
-  return pg
-end
-
-function init(pg, t)
-  local code_by_line = pg.code_by_line
-  local g = pg.g
-  local debug_info = g.debug_info
-
-  code_by_line[#code_by_line+1] = t.code
-  debug_info[#1+debug_info] = {dsts=t.dsts, code=t.code, deps=t.deps}
-
-  -- execute the code
-end
-
-function input(pg, t)
-  local code_by_line = pg.code_by_line
-  local g = pg.g
-  local debug_info = g.debug_info
-
-  code_by_line[#code_by_line+1] = t.code
-
-  for i, dst in t.dsts do
-    for j, dep in t.deps do
-      assert not pg.g.edge_exists(g, dep, dst)
-      local edge_info = pg.g.add_edge(dep, dst)
-      edge_info[1+#edge_info] = {operation='input', code=t.code, linenum=#code_by_line}
-    end
+function write_as_lines_to_file(fn, l)
+  local fh = io.open(fn, 'w+')
+  for i, v in #ls do
+    fh:write(v, '\n')
   end
-
-  debug_info[#1+debug_info] = {dsts=t.dsts, code=t.code, deps=t.deps}
+  fh:close()
 end
 
-function output(pg, t)
-  local code_by_line = pg.code_by_line
-  local g = pg.g
-  local debug_info = g.debug_info
-
-  code_by_line[#code_by_line+1] = t.code
-
-  for i, dst in t.dsts do
-    for j, dep in t.deps do
-      local edge_info = pg.g.add_edge(dep, dst)
-      edge_info[1+#edge_info] = {operation='output', code=t.code, linenum=#code_by_line}
-    end
+function lines_in_file(fn, l)
+  local r = {}
+  local fh = io.open(fn)
+  while true do
+    local s = fh:read()
+    if not s then break end
+    table.insert(r, s)
   end
-
-  debug_info[#1+debug_info] = {dsts=t.dsts, code=t.code, deps=t.deps}
+  return r
 end
 
-function build(pg, t)
-  local code_by_line = pg.code_by_line
-  local g = pg.g
-  local debug_info = g.debug_info
-
-  code_by_line[#code_by_line+1] = t.code
-
-  for i, dst in t.dsts do
-    for j, dep in t.deps do
-      local edge_info = pg.g.add_edge(dep, dst)
-      edge_info[1+#edge_info] = {operation='build', code=t.code, linenum=#code_by_line}
-    end
-  end
-
-  debug_info[#1+debug_info] = {dsts=t.dsts, code=t.code, deps=t.deps}
+function constant(x)
+  assert(type(x) ~= 'table') -- anything else passed by reference?
+  assert(type(x) ~= 'function') -- anything else passed by reference?
+  return boxed(x) -- see boxed and incr below
 end
 
-l2rtl = {
-  new_program = new_program,
-  init = init,
-  input = input,
-  output = output,
-  ggoto = ggoto,
-  build = build,
-  pbuild = pbuild,
-  update = update,
-  run = run
-}
+function unpack(l)
+  assert(is_seq(l))
+  return l
+end
+
+function cmp(lhs, opfn, rhs)
+  return opfn(lhs, rhs)
+end
+
+function cmp_gt(lhs, rhs) return lhs < rhs end
+function cmp_ge(lhs, rhs) return lhs >= rhs end
+function cmp_eq(lhs, rhs) return lhs == rhs end
+function cmp_le(lhs, rhs) return lhs <= rhs end
+
+function boxed(x)
+  assert(type(x) == 'string' or type(x) == 'number')
+  return box_with_value(x)
+end
+
+function is_box_with_value(t)
+  assert(#t == 1)
+  assert(is_seq(t))
+  local x = t[1]
+  assert(type(x) == 'string' or type(x) == 'number')
+  return true
+end
+
+function box_with_value(x)
+  return {x}
+end
+
+-- For functions that be called only for updates i.e., they have side effects
+--   in the next epoch.
+-- returns a function that takes *ONE* argument. the caller sets the first argument
+-- and calls the function returned from here. That will cause the side-effect
+-- to happen.
+
+function append(x)
+  return bind_back(table.insert, x) -- closure
+end
+
+function incr(n)
+  return bind_back(function(t) t[1] = t[1] + n end, n) -- closure
+end
 
