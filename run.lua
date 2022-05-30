@@ -80,74 +80,8 @@ function num_ready_lines_with_operation(ready_lines, g, operation)
   return n
 end
 
-function get_code(g, i)
-  return g.lines[i].code
-end
-
 function test_execute_line(g, linenum, dst_values)
-  local line = g.lines[linenum]
-  if line.operation == 'init' then
-    line.done = 1
-    return {}
-  end
-
-  if line.operation == 'input' then
-    line.done = 1
-    return {{line.dsts[1], 'roots.txt'}}
-  end
-
-  --[[if linenum == 7 or linenum == 8 then -- 'new list'
-    line.done = 1
-    return {{line.dsts[1], {}}}
-  end--]]
-
-  if line.operation == 'build' then
-    if line.dsts[1] == 'root_sitemaps' then
-      line.done = 1
-      return {{line.dsts[1], {'sitemap1.txt', 'sitemap2.txt', 'sitemap3.txt'}}}
-    end
-  end
-
-  if line.operation == 'ggoto' then
-    if string.find(line.code, 'queue') then
-      local queue = dst_values.queue
-      local r = (#queue <= 0)
-      if r == true then
-        return {{line.dsts[1], {src=linenum}}}
-      end
-    end
-    if string.find(line.code, 'level') then
-      local level = dst_values.level
-      local r = level and (level > 3)
-      if r == true then
-        return {{line.dsts[1], {src=linenum}}}
-      end
-    end
-  end
-
-  if string.find(line.code, 'queue.pop()') then
-    local queue = dst_values.queue
-    local r = (#queue > 0)
-    if r == true then
-      return {{line.dsts[1], queue.remove()}}
-    end
-  end
-
-  if string.find(line.code, 'unpack root_sitemaps') then
-    line.done = 1
-    local root_sitemaps = dst_values.root_sitemaps
-    local r = {}
-    for i, v in ipairs(root_sitemaps) do
-      r[1+#r] = {line.dsts[1], v}
-    end
-    return r
-  end
-
-  dlog('execute_line', 'no match: ', linenum, ' ', line)
-end
-
-function execute_line(g, linenum, dst_values)
-  local me = 'execute_line'
+  local me = 'test_execline'
   local line = g.lines[linenum]
   v_level = 0  -- global on purpose
 
@@ -206,6 +140,63 @@ function execute_line(g, linenum, dst_values)
   dlog4(me, 'no match: ', linenum, ' ', line)
 end
 
+-- returns current value. then overwrites g with new_value.
+function save_and_set_global_g(new_value)
+  local me = 'save_g'
+  local tmp = gx
+  assert(type(tmp) == 'nil' or type(tmp) == 'table')  -- by reference
+  assert(type(new_value) == 'nil' or type(new_value) == 'table')  -- by reference
+  gx = new_value
+  return tmp
+end
+
+-- returns a list of (dst, value) pairs.
+function execute_line(g, linenum, built_values)
+  local me = 'execline'
+  local line = g.lines[linenum]
+
+  local luacode = 'return ' .. line.code
+  dlog4(me, 'luacode=', luacode)
+  local codefn = load(luacode)
+  if (codefn == nil) then
+    dlog4(me, 'Lua error in luacode=', luacode, ' at linenum=', linenum)
+  end
+  assert(codefn ~= nil)
+
+  -- change the global 'g' while we eval user code (eval lol #yolo).
+  -- the identifier 'g' inside luacode is the current dst values.
+  -- do this in a separate function b/c 'g' is in local scope.
+  -- even if not, this is better b/c future-proofing.
+  local prev_g = save_and_set_global_g(built_values)
+  local retvals = table.pack(codefn())
+  local g_used_in_eval = save_and_set_global_g(prev_g)
+
+  line.done = 1  -- renaming takes care of loops; lines exec'd at most once per epoch
+
+  local results = {}
+  for i = 1, retvals.n do
+    table.insert(results, retvals[i])
+  end
+  dlog4(me, 'got results', ' #dsts=', #line.dsts, ' results=', results)
+
+  assert((#line.dsts == 0) or (#line.dsts >= 1 and is_seq(results) and #results == #line.dsts))
+
+  local new_values = nil
+  if #line.dsts == 0 then
+    new_values = nil
+  elseif #line.dsts == 1 then
+    new_values = {{line.dsts[1], results[1]}}
+  else
+    -- zip of dsts and results.
+    new_values = {}
+    for i = 1, #line.dsts do
+      table.insert(new_values, {line.dsts[i], results[i]})
+    end
+  end
+
+  return new_values
+end
+
 function parsed_line_to_source(p)
   return p.linenum .. ' ' .. p.operation .. ' ' .. join(p.dsts, ', ') .. ': ' .. p.code .. '  -- deps: ' .. join(p.deps, ', ')
 end
@@ -221,7 +212,9 @@ function run_program(g)
   local pass_num = 0
   while true do
     pass_num = pass_num + 1
+    dlog_lines(me, pass_num .. ' Values available in this pass:', built_values)
     dlog1(me, pass_num, ' Checking for ready lines.')
+    dlog_flush()
     assert(pass_num < #g.lines)
 
     local ready_lines = find_ready_lines(g, built_values, {'output'})
@@ -269,7 +262,7 @@ function run_program(g)
     -- create multiple copies here if repeated values.
     -- and start off a parallel thread of execution.
     -- lol coroutine or closure?
-    dlog(me, pass_num, ' Updating values received from ready lines: ', map(value_updates, function (u) return u[1] end))
+    dlog_lines(me, pass_num .. ' Updating values received from ready lines: ', value_updates)
     for i, v in ipairs(value_updates) do
       built_values[v[1]] = v[2]
     end

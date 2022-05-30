@@ -380,7 +380,7 @@ end
 function parsed_lines_to_str(ctx, parsed_line_to_code_fn)
   -- local r = 'local l2rtl = require(\'l2rtl\')\ng = l2rtl.new_program()\n'
   local r = ''
-  r = r .. 'dofile(\'run.lua\')\ng = {lines={\n'
+  r = r .. 'dofile(\'run.lua\')\ndofile(\'l2rtl.lua\')\ng = {lines={\n'
   local code = ctx.code
   local lines = map(ctx.parsed_lines, parsed_line_to_code_fn)
   for i, s in ipairs(lines) do

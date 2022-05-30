@@ -4,9 +4,19 @@ dofile('stdlib.lua')
 
 l2args = {}
 
-function set_argv(t)
-  assert(is_seq(t))
-  l2args = map(t, function(x) assert(type(x) == 'string'); return '' .. x end) -- coerce to string
+function l2dofile(fn)
+  dofile(fn)
+  return nil
+end
+
+function set_argv(...)
+  l2args = {}
+  for i = 1, select('#', ...) do
+    local arg = select(i, ...)
+    assert(type(arg) == 'string')
+    table.insert(l2args, arg)
+  end
+  return nil
 end
 
 function argv(i)
@@ -23,8 +33,12 @@ function write_as_lines_to_file(fn, l)
 end
 
 function lines_in_file(fn, l)
+  local me = 'lines_in_file'
   local r = {}
+  dlog(me, 'fn=', fn)
+  dlog(me, ' within lines_in_file:', gx)
   local fh = io.open(fn)
+  assert(fh ~= nil)
   while true do
     local s = fh:read()
     if not s then break end
@@ -36,7 +50,12 @@ end
 function constant(x)
   assert(type(x) ~= 'table') -- anything else passed by reference?
   assert(type(x) ~= 'function') -- anything else passed by reference?
-  return boxed(x) -- see boxed and incr below
+  -- return boxed(x) -- see boxed and incr below
+  return x
+end
+
+function add(v, n)
+  return v + n
 end
 
 function unpack(l)
@@ -44,13 +63,31 @@ function unpack(l)
   return l
 end
 
-function cmp(lhs, opfn, rhs)
-  return opfn(lhs, rhs)
+--[[
+function cmp_le(lhs, rhs)
+  return function
+    assert(is_box_with_value(lhs))
+    return lhs[1] <= rhs
+  end
+end
+--]]
+
+function onlyif(opfn, lhs, rhs)
+  -- true iff conditionfn == true
+  function do_onlyif()
+    if opfn(lhs, rhs) == true then
+      return true
+    else
+      return false
+    end
+  end
+
+  return do_onlyif()
 end
 
-function cmp_gt(lhs, rhs) return lhs < rhs end
-function cmp_ge(lhs, rhs) return lhs >= rhs end
-function cmp_eq(lhs, rhs) return lhs == rhs end
+--function docmp_gt(lhs, rhs) return lhs < rhs end
+--function docmp_ge(lhs, rhs) return lhs >= rhs end
+--function docmp_eq(lhs, rhs) return lhs == rhs end
 function cmp_le(lhs, rhs) return lhs <= rhs end
 
 function boxed(x)
@@ -77,10 +114,15 @@ end
 -- to happen.
 
 function append(x)
-  return bind_back(table.insert, x) -- closure
+  return bind_back(table.insert, x) -- not a closure. my name is captured in table.insert.
 end
 
 function incr(n)
-  return bind_back(function(t) t[1] = t[1] + n end, n) -- closure
+  function doincr(b, x)
+    -- the number to be incremented has to be boxed inside a table.
+    b[1] = b[1] + x
+  end
+
+  return bind_back(doincr, n) -- technically not a closure. my name is captured by calling doincr.
 end
 

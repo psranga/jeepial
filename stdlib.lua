@@ -1,3 +1,11 @@
+--[[
+if not prev_assert then prev_assert = assert end
+function assert(...)
+  dlog_flush()
+  prev_assert(...)
+end
+--]]
+
 function max(a, b, ...)
   if b == nil then return a end
   if a >= b then
@@ -247,7 +255,7 @@ end
 -- bind_back(f, a, b, c)(e, f, g) = f(e, f, g, a, b, c)
 function bind_back(f, ...)
   local args = table.pack(...)
-  local r = function(...) return f(..., table.unpack(args)) end
+  local r = function(...) return f(..., table.unpack(args)) end  -- closure
   return r
 end
 
@@ -296,6 +304,8 @@ function dlog_snippet(x)
     else
       return map_to_str(x)
     end
+  elseif type(x) == 'function' then
+    return '<function>'
   end
 
   return x
@@ -319,6 +329,10 @@ function pad_or_shorten_loc_str(s, n)
     r = string.sub(s, 1, -offset-1) .. trunc_marker
   end
   return r
+end
+
+function dlog_flush()
+  io.output():flush()
 end
 
 function dlogue(loc, level, ...)
