@@ -521,6 +521,8 @@ end
 
 function rename_dsts(ctx)
   local rename_infos = find_dsts_to_be_renamed(ctx) -- [(dst, newname, linenum)]
+  assert(ctx and ctx.debug_info)
+  ctx.debug_info.rename_infos = rename_infos
   for i, rename_info in ipairs(rename_infos) do
     local dst_to_be_renamed, new_name, linenum = table.unpack(rename_info)
     local p = ctx.parsed_lines[linenum]
@@ -1234,7 +1236,7 @@ function compile_l2(buf)
   for i, s in ipairs(lines) do
     dlog('compile_l2', 'line: ', i, ' ', s)
   end
-  local ctx = {symtab = {}, dsts = {}, code = {}, parsed_lines = {}}
+  local ctx = {symtab = {}, dsts = {}, code = {}, parsed_lines = {}, debug_info = {}}
   local code = ctx.code
   for i, s in ipairs(lines) do
     if (s == '') or (s[1] == '#') then
@@ -1383,7 +1385,8 @@ end
 
 function program_for_dlog(ctx)
   local debug_info = join(map(ctx.parsed_lines, function (x, i) return '-- ' .. i .. ' ' .. parsed_line_to_source(x) end), '\n')
-  return debug_info
+  local rename_infos = '-- rename_infos: ' .. obj_to_str(ctx.debug_info)
+  return debug_info .. '\n' .. rename_infos
 end
 
 function write_graph_to_file(fn, ctx)

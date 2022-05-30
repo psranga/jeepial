@@ -301,6 +301,26 @@ function dlog_snippet(x)
   return x
 end
 
+-- do something if s is shorter/longer than n.
+function pad_or_shorten_loc_str(s, n)
+  local padding = n - #s
+  local r
+  if padding == 0 then
+    r = s
+  elseif padding > 0 then -- s is shorter than n chars
+    -- pad on the left
+    r = rep(' ', padding) .. s
+  else
+    -- truncate from the right; delta is negative we need a positive offset
+    -- fancy lol: use fewer chars for trunc marker if s is just a bit longer
+    -- fancy2 lol: use the negative offsets of string.sub.
+    local trunc_marker = string.sub('...', padding)
+    local offset = (#s + #trunc_marker) - n
+    r = string.sub(s, 1, -offset-1) .. trunc_marker
+  end
+  return r
+end
+
 function dlogue(loc, level, ...)
   if stdlib.disabled_dlog_sections[loc] == 1 then return end
   if stdlib.disabled_dlog_sections['*'] == 1 then return end
@@ -310,7 +330,9 @@ function dlogue(loc, level, ...)
     loc_str = join(loc, '.')
   end
 
-  io.write('dlog', level, ' ', loc, ': ')
+  loc_str = pad_or_shorten_loc_str(loc_str, 12)
+
+  io.write('dlog', level, ' ', loc_str, ': ')
   for i = 1, select('#', ...) do
     -- if i > 1 then io.write(', ') end
     local arg = select(i, ...)
@@ -321,6 +343,14 @@ end
 
 function dlog(loc, ...)
   dlogue(loc, 1, ...)
+end
+
+function dlog1(...)
+  return dlog(...)
+end
+
+function dlog8(loc, ...)
+  dlogue(loc, 8, rep('  ', 4), ...)
 end
 
 function dlog6(loc, ...)
