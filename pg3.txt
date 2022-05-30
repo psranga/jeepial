@@ -1,0 +1,21 @@
+init: l2dofile ('crawl_sitemaps.lua')
+init: set_argv ('roots_site1.txt', 'pages.txt')
+
+input root_sitemapstxt: argv(1)
+output write_allpages: write_as_lines_to_file ( argv(2) , gx.allpages )
+
+build root_sitemaps: lines_in_file ( gx.root_sitemapstxt )
+build level: constant( 0 )
+
+pbuild url: unpack ( gx.root_sitemaps )
+
+precondition xml: onlyif ( cmp_le, gx.level, 2 )
+build xml: wget ( gx.url )
+update level: add ( gx.level, 1 ) or gx.xml
+
+build pages, indexes: process_one_sitemap ( gx.xml )
+
+pbuild url: unpack ( gx.indexes )
+
+pbuild page: unpack ( gx.pages )
+update allpages: append ( gx.page )
