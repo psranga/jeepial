@@ -58,9 +58,15 @@ function add(v, n)
   return v + n
 end
 
+-- each item in list 'l' is put in a separate 1-item list.
+-- TODO: use metatables and stuff to encode that this is an unpacked list?
 function unpack(l)
   assert(is_seq(l))
-  return l
+  local r = {}
+  for i, v in ipairs(l) do
+    table.insert(r, {v})
+  end
+  return r
 end
 
 --[[

@@ -1,6 +1,9 @@
 function wget(url)
-  dlog('wget')
-  return 'xmltext'
+  local webcache = {
+    nytr1="nytr1",
+    nytr2="nytr2"
+  }
+  return webcache[url] or 'xmltext'
 end
 
 function process_one_sitemap(xmltext)
