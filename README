@@ -1,0 +1,165 @@
+(work in progress)
+
+INTRODUCTION
+
+Jeepial: Graph Programming Language
+
+Something non-trivial to understand the Lua programming language. I'm probably
+"writing C++ in Lua".
+
+(This may or may not be useful. I'm not completely sure yet.)
+
+
+WHAT PROBLEM JEEPIAL ATTEMPTS TO SOLVE
+
+Is it possible to create a system that's similar in
+understandability to tools like (basic) make, xargs, parallel [vs things like hadoop etc]
+but can "take you further" than those tools can
+
+i.e., 10X gain for 2X pain :)
+
+IMO there's no two ways about it: parallel things are intrinsically more
+complicated than serial things. We can reduce additional complexity, but not
+eliminate it.
+
+Writing and running single-machine, multicore, parallel, long-running parallel
+tasks should be easy and routine on a single machine. Examples: scaling the
+1000s of pictures in your catalog, homebrew web crawling
+
+DESIGN PHILOSOPHY
+
+Make/Ninja: Thou shalt not have multiple rules for the same target.
+Jeepial: hold my beer
+
+But seriously, I found the ninja build tool influential. I recommend it. (that
+is the only build tool whose principles I can understand) Someone cleverer than
+me might figre out how to do what Jeepial does entirely in Ninja.
+
+Indeed I myself first attempted to do it entirely in Ninja, but there seemed to
+be too much impedence mimatch.
+
+My hunch is that some solutions are expressed more easily if we agree to allow
+  "multiple rules can generate the same target". Therefore:
+
+1.  Jeepial takes seriously the idea that producing the same target from multiple rules
+    might be useful.
+
+2   Jeepial strives to define and implement useful behavior in that case.
+
+3.  Jeepial strives to provide intuitive notation to allow power users to
+    trivially express the above-defined behaviors.
+
+4.  Jeepial strives to provide notataion, abstractions, and runtime library
+    support to provide automatic fault-tolerant facilities such as: checkpointing,
+    multi-machine parallelism, snapshotting inputs,
+
+i.e., Jeepial eats DAGs for breakfast.
+
+NOTE ABOUT LUA
+
+I missed the "batteries included" aspect of Python, but I
+can definitely appreciate the minimalism of Lua. It's like old-school systems like
+Turbo Pascal when you could hold almost the entire runtime library in
+your memory. Anyhoo this is a half-apology for the file stdlib.lua :).
+
+RUNNING
+
+# I'm lazy. The "build script" gen-graph.sh calls utils from qpdf, graphviz etc.
+# Linux Mint 20.04 (also Ubuntu 20.04)
+$ sudo apt install lua5.3 graphviz qpdf ghostscript a2ps
+
+INPUT
+
+$ cat pg3.txt
+
+    init: l2dofile ('crawl_sitemaps.lua')
+    init: set_argv ('roots_site1.txt', 'all_article_urls.txt')
+
+    input root_sitemapsfn: argv(1)
+    output write_allpages: write_as_lines_to_file ( argv(2) , gx.all_article_urls )
+
+    build root_sitemap_urls: lines_in_file ( gx.root_sitemapsfn )
+    build level: constant( 0 )
+
+    pbuild sitemap_url: unpack ( gx.root_sitemap_urls )
+
+    precondition sitemap_xml: onlyif ( cmp_le, gx.level, 2 )
+    build sitemap_xml: wget ( gx.sitemap_url )
+    update level: add ( gx.level, 1 ) or gx.sitemap_xml
+
+    build article_urls, sitemap_urls: process_one_sitemap ( gx.sitemap_xml )
+
+    pbuild sitemap_url: unpack ( gx.sitemap_urls )
+
+    pbuild article_url: unpack ( gx.article_urls )
+    update all_article_urls: append ( gx.article_url )
+
+EXECUTION / RUNNING
+
+Generate the Lua program which when run runs the program you wrote.
+
+STAGE 1: PARSING, LEVELIZING, AND UNROLLING
+
+$ export p=pg3 ; bash gen-graph.sh
+
+    + lua l2.lua pg3.txt pg3.lua pg3.gv pg3.0.gv
+    dlog1 compile_args: Compiling buf read from pg3.txt with 726 chars.
+    dlog2 compile_args:   checking renaming.
+    dlog2 compile_args:   second pass rename_infos: []
+    dlog1 compile_args: Done. ir=pg3.lua graph=pg3.gv dgraph=pg3.0.gv
+    + dot -Tpdf pg3.gv -opg3.1.pdf
+    + dot -Tpdf pg3.0.gv -opg3.0.pdf
+    + grep '^-- ' pg3.lua
+    + a2ps --border=0 -B --columns=1 -l 100 -R -o-
+    + ps2ps -sPAPERSIZE=letter - -
+    + ps2pdf - pg3.ovl.pdf
+    [stdin (plain): 1 page on 1 sheet]
+    [Total: 1 page on 1 sheet] sent to the standard output
+    [1 line wrapped]
+    + qpdf --overlay pg3.ovl.pdf --repeat=1 -- --empty --pages pg3.0.pdf pg3.1.pdf -- /dev/fd/63
+    ++ pdftops -paper letter -expand - -
+    ++ ps2pdf - pg3.c.pdf
+    + rm pg3.ovl.pdf
+
+OUTPUT OF STAGE 1
+
+# Display the graphical version of the program pg3.txt
+$ xdg-open p3.c.pdf
+$ lp p3.c.pdf  # 3 pages
+
+# Display the generated intermediate code.
+$ cat -n pg3.lua
+
+    ...
+    16	dofile('run.lua')
+    17	dofile('l2rtl.lua')
+    18	g = {lines={
+    19	  {linenum=1, operation='init',
+    20	  code=[[l2dofile ('crawl_sitemaps.lua')]],
+    21	  dsts={}, deps={[[START]]}},
+    22	
+    23	  {linenum=2, operation='init',
+    24	  code=[[set_argv ('roots_site1.txt', 'all_article_urls.txt')]],
+    25	  dsts={}, deps={[[START]]}},
+    26	
+    27	  {linenum=3, operation='input',
+    28	  code=[[argv(1)]],
+    29	  dsts={[[root_sitemapsfn]]}, deps={[[START]]}},
+    ...
+    ...
+    71	  {linenum=14, operation='update',
+    72	  code=[[append ( gx.article_url )]],
+    73	  dsts={[[all_article_urls]]}, deps={[[article_url]]}}
+    74	}}
+    75	run_program(g)
+
+STAGE 2
+
+$ lua pg3.lua | tee f
+
+OUTPUT OF STAGE 2:
+
+See the log file f. pg3.txt mocks out all network calls and execution.
+
+Ranga
+
