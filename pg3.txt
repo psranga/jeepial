@@ -1,21 +1,21 @@
 init: l2dofile ('crawl_sitemaps.lua')
-init: set_argv ('roots_site1.txt', 'pages.txt')
+init: set_argv ('roots_site1.txt', 'all_article_urls.txt')
 
-input root_sitemapstxt: argv(1)
-output write_allpages: write_as_lines_to_file ( argv(2) , gx.allpages )
+input root_sitemapsfn: argv(1)
+output write_allpages: write_as_lines_to_file ( argv(2) , gx.all_article_urls )
 
-build root_sitemaps: lines_in_file ( gx.root_sitemapstxt )
+build root_sitemap_urls: lines_in_file ( gx.root_sitemapsfn )
 build level: constant( 0 )
 
-pbuild url: unpack ( gx.root_sitemaps )
+pbuild sitemap_url: unpack ( gx.root_sitemap_urls )
 
-precondition xml: onlyif ( cmp_le, gx.level, 2 )
-build xml: wget ( gx.url )
-update level: add ( gx.level, 1 ) or gx.xml
+precondition sitemap_xml: onlyif ( cmp_le, gx.level, 2 )
+build sitemap_xml: wget ( gx.sitemap_url )
+update level: add ( gx.level, 1 ) or gx.sitemap_xml
 
-build pages, indexes: process_one_sitemap ( gx.xml )
+build article_urls, sitemap_urls: process_one_sitemap ( gx.sitemap_xml )
 
-pbuild url: unpack ( gx.indexes )
+pbuild sitemap_url: unpack ( gx.sitemap_urls )
 
-pbuild page: unpack ( gx.pages )
-update allpages: append ( gx.page )
+pbuild article_url: unpack ( gx.article_urls )
+update all_article_urls: append ( gx.article_url )
