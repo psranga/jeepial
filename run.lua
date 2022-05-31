@@ -201,19 +201,16 @@ function parsed_line_to_source(p)
   return p.linenum .. ' ' .. p.operation .. ' ' .. join(p.dsts, ', ') .. ': ' .. p.code .. '  -- deps: ' .. join(p.deps, ', ')
 end
 
-function run_program(g)
-  local me = 'run_program'
-  built_values = {START={}}
-
-  local debug_info = join(map(g.lines, function (x) return '  ' .. parsed_line_to_source(x) end), '\n')
-  dlog('run_program', 'running program:\n', debug_info, '\n')
+function run_epoch(g, epoch_num, built_values)
+  local me = 'run_epoch'
 
   local value_updates = {}
   local pass_num = 0
   while true do
     pass_num = pass_num + 1
-    dlog_lines(me, pass_num .. ' Values available in this pass:', built_values)
-    dlog1(me, pass_num, ' Checking for ready lines.')
+    local pass_str = epoch_num .. '.' .. pass_num
+    dlog_lines(me, pass_str .. ' Values available in this pass:', built_values)
+    dlog1(me, pass_str, ' Checking for ready lines.')
     dlog_flush()
     assert(pass_num < #g.lines)
 
@@ -227,8 +224,8 @@ function run_program(g)
     if #ready_lines == 0 then break end
     -- (within reason) 'if' condition doesn't introduce a new indent level for logging.
     if num_ready_lines_with_operation(ready_lines, g, 'precondition') == #ready_lines then
-      dlog('run_program', pass_num, 'all ready lines are preconditions. Done with this epoch.')
-      dlog('run_program', pass_num, 'value updates for next epoch:\n  #n=', #value_updates, '\n', join(map(value_updates, function(x, i) return '  ' .. i .. ' ' .. dlog_snippet(x) end), '\n'))
+      dlog(me, pass_str, ' All ready lines are preconditions. Done with this epoch.')
+      dlog(me, pass_str, ' Value updates for next epoch:\n  #n=', #value_updates, '\n', join(map(value_updates, function(x, i) return '  ' .. i .. ' ' .. dlog_snippet(x) end), '\n'))
       break
     end
 
@@ -262,11 +259,41 @@ function run_program(g)
     -- create multiple copies here if repeated values.
     -- and start off a parallel thread of execution.
     -- lol coroutine or closure?
-    dlog_lines(me, pass_num .. ' Updating values received from ready lines: ', value_updates)
+    dlog_lines(me, pass_str .. ' Updating values received from ready lines: ', value_updates)
     for i, v in ipairs(value_updates) do
       built_values[v[1]] = v[2]
     end
-    dlog(me, pass_num, ' Updated values. Will check for new ready lines.')
+    dlog(me, pass_str, ' Updated values. Will check for new ready lines.')
   end
+
+  return pass_num
 end
 
+function run_program(g)
+  local me = 'run_program'
+
+  local debug_info = join(map(g.lines, function (x) return '  ' .. parsed_line_to_source(x) end), '\n')
+  dlog(me, 'running program:\n', debug_info, '\n')
+
+  local values_snapshots = {} -- epoch_num -> built_values
+  local epoch_num = 0
+  local built_values = {START={}}
+
+  while true do
+    epoch_num = epoch_num + 1
+    local epoch_str = epoch_num
+    dlog_lines(me, epoch_str .. ' Values available at epoch start:', built_values)
+
+    local num_passes = run_epoch(g, epoch_num, built_values)
+    dlog1(me, epoch_str, ' num_passes=', num_passes)
+
+    dlog_lines(me, epoch_str .. ' Values at epoch end: ', built_values)
+    values_snapshots[epoch_num] = obj_to_str(built_values)  -- lol deep copy!
+
+    if num_passes >= 1  then
+      dlog('run_program', pass_num, ' This epoch had no updates? All epochs done.')
+      break
+    end
+
+  end
+end
