@@ -256,10 +256,45 @@ function run_epoch(g, epoch_num, built_values)
     end
 
     -- update values
+    function is_any_multivalued(value_updates)
+      return num_multivalued(value_updates) > 1
+    end
+
+    function multivalued_updates(value_updates)
+      -- is any value_update a list of lists?
+      local r = {}
+      for value_index, value_update in ipairs(value_updates) do
+        local dst = value_update[1]
+        local new_value = value_update[2]
+        -- dlog('num_multivalued', 'value_update=', value_update)
+        if type(new_value) == 'table' then dlog('num_multivalued', '#=', #new_value, ' =', new_value) end
+        if type(new_value) == 'table' and #new_value > 1 then -- list of ...
+          -- dlog('num_multivalued', '  new_value=', new_value)
+          local ok = true
+          for i, v in ipairs(new_value) do
+            ok = ok and (type(v) == 'table' and #v == 1)
+          end
+          if ok then table.insert(r, value_index) end
+        else
+          -- dlog('num_multivalued', '  not table=', new_value, ' type=', type(new_value))
+        end
+      end
+      return r
+    end
+
     -- create multiple copies here if repeated values.
     -- and start off a parallel thread of execution.
     -- lol coroutine or closure?
     dlog_lines(me, pass_str .. ' Updating values received from ready lines: ', value_updates)
+
+    local multi_indexes = multivalued_updates(value_updates)
+    dlog(me, pass_str, ' multi_indexes=', multi_indexes)
+
+    for i, v in ipairs(multi_indexes) do
+      local value_update = value_updates[v]
+      local built_values_copy = table.pack(table.unpack(built_values))
+    end
+
     for i, v in ipairs(value_updates) do
       built_values[v[1]] = v[2]
     end
