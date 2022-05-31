@@ -337,7 +337,10 @@ end
 
 function dlogue(loc, level, ...)
   if stdlib.disabled_dlog_sections[loc] == 1 then return end
-  if stdlib.disabled_dlog_sections['*'] == 1 then return end
+  if stdlib.disabled_dlog_sections['*'] == 1 and
+     stdlib.disabled_dlog_sections[loc] ~= 0 then
+     return  -- all disabled, and this is not explicitly enabled.
+  end
 
   local loc_str = loc
   if type(loc) == 'table' then

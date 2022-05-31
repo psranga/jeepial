@@ -1398,16 +1398,19 @@ function write_graph_to_file(fn, ctx)
 end
 
 function compile_args()
+  local me = 'compile_args'
   assert(arg[1] ~= nil)
   assert(arg[2] ~= nil)
   assert(arg[3] ~= nil)
   assert(arg[4] ~= nil)
 
   dlog_disable('*', 'update_deps', 'compile_l2', 'compile_step', 'find_dsts_to_be_renamed')
+  dlog_enable(me)
 
   io.input(arg[1])
   local buf = io.read('a')
 
+  dlog(me, 'Compiling buf read from ', arg[1], ' with ', #buf, ' chars.')
   local ctx = compile_l2(buf)
   update_deps(ctx)  -- just in case: so dsts is known-good.
   write_graph_to_file(arg[4], ctx) -- dump graph before renaming for debugging
@@ -1416,15 +1419,16 @@ function compile_args()
   update_deps(ctx)
   write_graph_to_file(arg[3], ctx)
 
-  dlog2('main', 'checking renaming.')
+  dlog2(me, 'checking renaming.')
   local rename_infos = find_dsts_to_be_renamed(ctx)  -- should not see any candidates
-  dlog2('main', 'second pass rename_infos: ', rename_infos)
+  dlog2(me, 'second pass rename_infos: ', rename_infos)
   assert(#rename_infos == 0)
 
-  io.output(arg[2])
+  local fh = io.open(arg[2], 'w+')
   local code = runnable_code(ctx)
-  io.write(program_for_dlog(ctx), '\n')
-  io.write(code)
+  fh:write(program_for_dlog(ctx), '\n')
+  fh:write(code)
+  dlog(me, 'Done. ir=', arg[2], ' graph=', arg[3], ' dgraph=', arg[4])
 end
 
 function test_topo()
