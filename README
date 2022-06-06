@@ -72,12 +72,6 @@ environment. For me, static typing helps me get into "flow" easily. Errors and
 warnings from compilers are *safety nets* not annoyances.
 
 This effect isn't apparent when reading 10-line snippets that go into books and blogs.
-But once the programs cross the 500-line mark, *I* seem to run into this issue.
-
-Btw, I do not agree with the Pascal convention that variables should be
-declared at the top of the function only (I understand why Pascal made that
-choice: single-pass compilation should be possible). I think C++ struck a happy
-middle ground. Yes, I've looked into Lisp/Erlang.
 
 I've arrived at this conclusion quite literally after decades of staying on the
 fence. Having used many dynamically-typed languages and faced the same problems over
@@ -88,7 +82,7 @@ clueless: they're all all far better programmers than me probably. :)
 I've written tens of thousands of lines for work and non-work purposes in many
 many dynamically typed languages (Tcl, Python, Lua, Javascript).
 
-RUNNING
+QUICKSTART / DEMO / RUNNING
 
 # I'm lazy. The "build script" gen-graph.sh calls utils from qpdf, graphviz etc.
 # Linux Mint 20.04 (also Ubuntu 20.04)
@@ -122,7 +116,8 @@ $ cat pg3.txt
 
 EXECUTION / RUNNING
 
-Generate the Lua program which when run runs the program you wrote.
+Generate the Lua program which when run runs the program you wrote. I'll expand
+on this.
 
 STAGE 1: PARSING, LEVELIZING, AND UNROLLING
 
