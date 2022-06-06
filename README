@@ -53,7 +53,9 @@ My hunch is that some solutions are expressed more easily if we agree to allow
     support to provide automatic fault-tolerant facilities such as: checkpointing,
     multi-machine parallelism, snapshotting inputs,
 
-i.e., Jeepial eats DAGs for breakfast.
+i.e., Jeepial eats DAGs (directed acycling graphs) for breakfast, and isn't
+fazed by cycles in graphs. :) Indeed, cycles in graphs are *useful* in Jeepial,
+not an error.
 
 NOTE ABOUT LUA
 
@@ -61,6 +63,30 @@ I missed the "batteries included" aspect of Python, but I
 can definitely appreciate the minimalism of Lua. It's like old-school systems like
 Turbo Pascal when you could hold almost the entire runtime library in
 your memory. Anyhoo this is a half-apology for the file stdlib.lua :).
+
+I'll expand on this later. My 2c: having to declare variables and their types
+is not an annoyance, it's instrumental in *reducing* the programmer's cognitive
+load spent on aspects of the *programming environment* and helps them spend
+more of it on the *actual user problem* they're solving using the programming
+environment. For me, static typing helps me get into "flow" easily. Errors and
+warnings from compilers are *safety nets* not annoyances.
+
+This effect isn't apparent when reading 10-line snippets that go into books and blogs.
+But once the programs cross the 500-line mark, *I* seem to run into this issue.
+
+Btw, I do not agree with the Pascal convention that variables should be
+declared at the top of the function only (I understand why Pascal made that
+choice: single-pass compilation should be possible). I think C++ struck a happy
+middle ground. Yes, I've looked into Lisp/Erlang.
+
+I've arrived at this conclusion quite literally after decades of staying on the
+fence. Having used many dynamically-typed languages and faced the same problems over
+and over, I've concluded that the problem must be either me, or intrinsic to
+the dynamically typing itself. I don't believe all of those language implementors are
+clueless: they're all all far better programmers than me probably. :)
+
+I've written tens of thousands of lines for work and non-work purposes in many
+many dynamically typed languages (Tcl, Python, Lua, Javascript).
 
 RUNNING
 
