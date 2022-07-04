@@ -47,7 +47,7 @@ end
 
 function print_csv(t)
   for i, row in ipairs(t) do
-    local s = ''
+    local s = '' .. pad_string('' .. i, 3) .. ': '
     for j, v in ipairs(row) do
       if j > 1 then s = s .. ',' end
       s = s .. v
@@ -80,26 +80,28 @@ function call_wo_nil(f, ...)
   return f(table.unpack(args))
 end
 
--- uses lambda pkf to provide sort keys that will be used to partition csv 't'.
--- table is returned sorted by pkf.
--- partitions are sorted by skf
--- pkf = partition key function
--- skt = sort key function
--- winf = window function that is called on every sorted partition.
+-- groups 't' keys returned by 'gkf' returning the row-comparison key.
+-- then sorts groups by keys returned by 'skf'.
+-- then runs 'winf' within the groups.
+-- groups are returned in arbitrary order
+--   for now it is: sorted-by 'gkf' and 'skf' to break ties.
+-- gkf = group key function
+-- skt = within-group sort key function
+-- winf = window function that is called on every sorted group.
 --        it returns new values for existing columns, or new columns and values.
-function csv_partition(t, pkf, skf, winf)
+function csv_group(t, gkf, skf, winf)
   local r = {}
   table.move(t, 1, #t, 1, r)
   if #r < 2 then return r end
 
   local parts = {}
   local sidx = 2
-  local ks = pkf(header, r[2])
+  local ks = gkf(header, r[2])
 
   for i, row in ipairs(r) do
     if i > 1 then
       local b = r[i]
-      local kb = pkf(header, b)
+      local kb = gkf(header, b)
       local is_new_part = (not (ks == kb))
       print(i, is_new_part, ks, kb)
       if is_new_part then
@@ -110,9 +112,8 @@ function csv_partition(t, pkf, skf, winf)
       end
     end
   end
-  if #r >= 2 then
-    table.insert(parts, {sidx, #r})
-  end
+  assert(#r >= 2)
+  table.insert(parts, {sidx, #r})
 
   if skf then
     for i, part in ipairs(parts) do
@@ -137,38 +138,54 @@ function csv_partition(t, pkf, skf, winf)
   return r,parts
 end
 
-function csv_partition_unused(t, pkf, skf, winf)
-  local r = {}
-  for i, row in ipairs(t) do
-    if i > 1 then
-      table.insert(r, row)
+-- TODO: generalize csv_partition and csv_group into one thing?
+-- partitions 't' into non-decreasing partitions per breakpoint function 'bpf'.
+-- "breakpoint function": returns a key that is used for comparisons.
+--   the next partition starts from the breakpoint.
+-- then optionally sorts partitions by keys returned by 'skf'.
+-- then runs 'winf' within the partitions.
+-- rows are permuted within partitions but relative order between partititions
+--   does not change.
+-- bpf = breakpoint function
+-- skt = within-partition sort key function
+-- winf = window function that is called on every sorted group.
+--        it returns new values for existing columns, or new columns and values.
+function csv_partition(t, bpf, skf, winf)
+  local compare_gt = function(a, b)
+    if type(a) == 'boolean' then
+      if a then a = 1 else a = 0 end
     end
+    if type(b) == 'boolean' then
+      if b then b = 1 else b = 0 end
+    end
+    return a > b
   end
-  local header = t[1]
-  table.sort(r, function (a, b) return pkf(header, a) < pkf(header, b) end)
-  table.insert(r, 1, t[1])
-  if #r < 2 then return r end
+
+  local r = {}
+  table.move(t, 1, #t, 1, r)
+  if #r < 3 then return r end
 
   local parts = {}
   local sidx = 2
-  local ks = pkf(header, r[2])
+  local eidx = sidx
 
   for i, row in ipairs(r) do
-    if i > 1 then
+    if i > 2 then
+      local a = r[i-1]
       local b = r[i]
-      local kb = pkf(header, b)
-      local is_new_part = (not (ks == kb))
-      if is_new_part then
+      local ka = bpf(header, a)
+      local kb = bpf(header, b)
+      local is_breakpoint = compare_gt(kb, ka)
+      print(i, is_breakpoint, ka, kb)
+      if is_breakpoint then
         eidx = i-1
         table.insert(parts, {sidx, eidx})
         sidx = i
-        ks = kb
       end
     end
   end
-  if #r >= 2 then
-    table.insert(parts, {sidx, #r})
-  end
+  assert(#r >= 3)
+  table.insert(parts, {sidx, #r})
 
   if skf then
     for i, part in ipairs(parts) do
