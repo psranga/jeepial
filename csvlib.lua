@@ -130,7 +130,7 @@ function csv_group(t, gkf, skf, winf)
       local sidx, eidx = table.unpack(part)
       local u = {}
       table.move(r, sidx, eidx, 1, u)
-      winf(r[1], u, 1, #u)
+      winf(r[1], u, 1, #u, i)
       table.move(u, 1, #u, sidx, r)
     end
   end
@@ -150,7 +150,11 @@ end
 -- skt = within-partition sort key function
 -- winf = window function that is called on every sorted group.
 --        it returns new values for existing columns, or new columns and values.
-function csv_partition(t, bpf, skf, winf)
+function csv_partition(t, bpf, skf, winf_or_list)
+  assert(type(bpf) == 'function')
+  assert(type(skf) == 'function')
+  assert(type(winf_or_list) == 'function' or type(winf_or_list) == 'table')
+
   local compare_gt = function(a, b)
     if type(a) == 'boolean' then
       if a then a = 1 else a = 0 end
@@ -175,8 +179,8 @@ function csv_partition(t, bpf, skf, winf)
       local b = r[i]
       local ka = bpf(header, a)
       local kb = bpf(header, b)
-      local is_breakpoint = compare_gt(kb, ka)
-      print(i, is_breakpoint, ka, kb)
+      local is_breakpoint = compare_gt(ka, kb)
+      --print(i, is_breakpoint, ka, kb)
       if is_breakpoint then
         eidx = i-1
         table.insert(parts, {sidx, eidx})
@@ -197,12 +201,19 @@ function csv_partition(t, bpf, skf, winf)
     end
   end
 
-  if winf then
+  if winf_or_list then
     for i, part in ipairs(parts) do
       local sidx, eidx = table.unpack(part)
       local u = {}
       table.move(r, sidx, eidx, 1, u)
-      winf(r[1], u, 1, #u)
+      if type(winf_or_list) ~= 'function' then
+        for j, winf in ipairs(winf_or_list) do
+          winf(r[1], u, 1, #u, i)
+        end
+      else
+        local winf = winf_or_list
+        winf(r[1], u, 1, #u, i)
+      end
       table.move(u, 1, #u, sidx, r)
     end
   end
@@ -229,4 +240,103 @@ function add_field(header, newfield)
     newfield_idx = list_find(header, newfield)
   end
   return newfield_idx
+end
+
+function csv_unique_values(t, colidx)
+  local lut = {}
+  for i, row in ipairs(t) do
+    if i > 1 then
+      lut[row[colidx]] = 1
+    end
+  end
+
+  local r = {}
+  for k, v in pairs(lut) do
+    table.insert(r, k)
+  end
+
+  return r
+end
+
+function csv_range(t, colidx, cmpfn)
+  local unique_values = csv_unique_values(t, colidx)
+  table.sort(unique_values, cmpfn)
+  return unique_values[1], unique_values[#unique_values]
+end
+
+-- uses 'xcoor', 'ycoor', 'coorvalue'
+-- returns a list of strings.
+function csv_render_as_grid(t, rspec)
+  local header = t[1]
+  local xidx = header['xcoor']
+  local yidx = header['ycoor']
+  local valueidx = header['coorvalue']
+
+  local first_x, last_x = csv_range(t, xidx)
+  local first_y, last_y = csv_range(t, yidx)
+
+  local datagrid = {}
+  for i = first_y, last_y do
+    local row = {}
+    for j = first_x, last_x do
+      table.insert(row, '')
+    end
+    table.insert(datagrid, row)
+  end
+
+  local maxlen = 0
+
+  for i, row in ipairs(t) do
+    if i > 1 then
+      local xcoor = row[xidx]
+      local ycoor = row[yidx]
+      local coorvalue = row[valueidx] .. ''
+      maxlen = max(maxlen, #coorvalue)
+      datagrid[ycoor-first_y+1][xcoor-first_x+1] = coorvalue
+    end
+  end
+
+  local lines = {}
+  local maxlinelen = 0
+
+  for i, row in ipairs(datagrid) do
+    local s = ''
+    for j, coorvalue in ipairs(row) do
+      if j > 1 then s = s .. ' ' end
+      s = s .. pad_string(coorvalue, maxlen)
+      if j < #row then s = s .. ' ' end
+    end
+    maxlinelen = max(maxlinelen, #s)
+    table.insert(lines, s)
+  end
+
+  if rspec and rspec.title then
+    table.insert(lines, 1, center_string(rspec.title, maxlinelen))
+  end
+
+  for i, line in ipairs(lines) do
+    print(line)
+  end
+end
+
+-- uses 'xcoor', 'ycoor', 'coorvalue'
+-- returns a list of strings.
+function csv_xx(t, rspec)
+  local header = t[1]
+  local xidx = header['xcoor']
+  local yidx = header['ycoor']
+  local valueidx = header['coorvalue']
+
+  local first_x, last_x = csv_range(t, xidx)
+  local first_y, last_y = csv_range(t, yidx)
+  local datagrid = {}
+
+  for i, row in ipairs(t) do
+    if i > 1 then
+      local xcoor = row[xidx]
+      local ycoor = row[yidx]
+      local coorvalue = row[valueidx]
+      datagrid[ycoor][xcoor] = coorvalue
+    end
+  end
 end
