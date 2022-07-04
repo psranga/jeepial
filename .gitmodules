@@ -1,0 +1,3 @@
+[submodule "luadate"]
+	path = luadate
+	url = git@github.com:psranga/luadate.git
