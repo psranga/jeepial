@@ -165,13 +165,14 @@ function csv_partition(t, bpf, skf, winf_or_list)
     return a > b
   end
 
-  local r = {}
-  table.move(t, 1, #t, 1, r)
+  local r = t
+  --table.move(t, 1, #t, 1, r)
   if #r < 3 then return r end
 
   local parts = {}
   local sidx = 2
   local eidx = sidx
+  local header = r[1]
 
   for i, row in ipairs(r) do
     if i > 2 then
@@ -226,8 +227,9 @@ function csv_sort(t, skf)
   local r = {}
   table.move(t, 2, #t, 1, r)
   table.sort(r, function (a, b) return skf(header, a) < skf(header, b) end)
+  table.move(r, 1, #r, 2, t)
   table.insert(r, 1, t[1])
-  return r
+  return t
 end
 
 function add_field(header, newfield)
@@ -275,8 +277,13 @@ function csv_render_as_grid(t, rspec)
   local first_x, last_x = csv_range(t, xidx)
   local first_y, last_y = csv_range(t, yidx)
 
+  local header_rows = 0
+  if rspec and rspec.thead then
+    header_rows = 1
+  end
+
   local datagrid = {}
-  for i = first_y, last_y do
+  for i = first_y, last_y + header_rows do
     local row = {}
     for j = first_x, last_x do
       table.insert(row, '')
@@ -292,7 +299,15 @@ function csv_render_as_grid(t, rspec)
       local ycoor = row[yidx]
       local coorvalue = row[valueidx] .. ''
       maxlen = max(maxlen, #coorvalue)
-      datagrid[ycoor-first_y+1][xcoor-first_x+1] = coorvalue
+      datagrid[ycoor-first_y+1+header_rows][xcoor-first_x+1] = coorvalue
+    end
+  end
+
+  if header_rows > 0 then
+    for i, v in ipairs(rspec.thead) do
+      local coorvalue = v .. ''
+      maxlen = max(maxlen, #coorvalue)
+      datagrid[1][i] = coorvalue
     end
   end
 
@@ -304,7 +319,7 @@ function csv_render_as_grid(t, rspec)
     for j, coorvalue in ipairs(row) do
       if j > 1 then s = s .. ' ' end
       s = s .. pad_string(coorvalue, maxlen)
-      if j < #row then s = s .. ' ' end
+      --if j < #row then s = s .. ' ' end
     end
     maxlinelen = max(maxlinelen, #s)
     table.insert(lines, s)
@@ -317,6 +332,23 @@ function csv_render_as_grid(t, rspec)
   for i, line in ipairs(lines) do
     print(line)
   end
+
+  -- character grid.
+  -- num columns = maxlinelen
+  -- num rows = #lines
+
+  local r = {}
+
+  local header = {}
+  add_field(header, 'linenum')
+  add_field(header, 'line')
+  table.insert(r, 1, header)
+
+  for i, line in ipairs(lines) do
+    table.insert(r, {i, line})
+  end
+
+  return r
 end
 
 -- uses 'xcoor', 'ycoor', 'coorvalue'
