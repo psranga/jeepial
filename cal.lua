@@ -63,11 +63,13 @@ function by_date(header, a)
 end
 
 function win_gridize(header, rows, sidx, eidx, part_idx)
+  local mweek_idx = add_field(header, 'monthweek')
   local ycoor_idx = add_field(header, 'ycoor')
   local xcoor_idx = add_field(header, 'xcoor')
   local cellvalue_idx = add_field(header, 'coorvalue')
   for i = sidx, eidx do
     local row = rows[i]
+    row[mweek_idx] = part_idx
     row[ycoor_idx] = part_idx
     row[xcoor_idx] = row[header['dow']] - 1
     row[cellvalue_idx] = math.floor(row[header['dd']] + 0)
