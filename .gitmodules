@@ -1,3 +1,6 @@
 [submodule "luadate"]
 	path = luadate
 	url = git@github.com:psranga/luadate.git
+[submodule "luash"]
+	path = luash
+	url = git@github.com:psranga/luash.git
