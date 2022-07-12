@@ -1,8 +1,38 @@
 local luadate = require('luadate/src/date')
+
+-- generating time series literally from SQL as a table.
+-- done in quick-and-dirty way by calling sqlite3.
+local luash = require('luash/sh')
+
 dofile('stdlib.lua')
 dofile('csvlib.lua')
 
-function gen_cal(y, m)
+function gen_cal_sql(y, m)
+  local sh_sqlite3 = luash.command('sqlite3')
+  local sql = [[select date, 1+strftime('%w', date) as dow, strftime('%Y', date) as yy, strftime('%m', date) as mm, strftime('%d', date) as dd from (select strdate as date from (select strftime('%Y-%m-%d', '2022-07-' || printf('%02d', dom)) as strdate, * from (select value as dom from generate_series(1,32,1))) where strdate != '');]]
+  local stdout = tostring(sqlite3({__input=sql}))
+
+  local r = {}
+  local header = {}
+  add_field(header, 'date')
+  add_field(header, 'dow')
+  add_field(header, 'yy')
+  add_field(header, 'mm')
+  add_field(header, 'dd')
+  table.insert(r, header)
+
+  -- trivial reformatting of the output SQL table:
+  --   convert the pipe-separated output into an in-memory table.
+  for i, line in ipairs(split(stdout, '\n')) do
+    local date, dow, yy, mm, dd = table.unpack(split(line, '|'))
+    local row = {date, dow, yy, mm, dd}
+    table.insert(r, row)
+  end
+
+  return r
+end
+
+function gen_cal_lua(y, m)
   local r = {}
   local header = {}
   add_field(header, 'date')
@@ -64,7 +94,7 @@ function win_gridize(header, rows, sidx, eidx, part_idx)
   end
 end
 
-function doit()
+function doit(gen_cal)
   local y = arg[1]
   assert(y)
 
@@ -92,4 +122,4 @@ function doit()
   end
 end
 
-doit()
+doit(gen_cal_lua)
