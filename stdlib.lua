@@ -304,6 +304,8 @@ function dlog_snippet(x)
     else
       return map_to_str(x)
     end
+  elseif type(x) == 'boolean' then
+    if x == true then return 'true' else return 'false' end
   elseif type(x) == 'function' then
     return '<function>'
   end
@@ -311,8 +313,25 @@ function dlog_snippet(x)
   return x
 end
 
+function center_string(s, n)
+  local padding = n - #s
+  local left = math.floor((n - #s) / 2)
+  local right = padding - left
+
+  local r
+  if padding == 0 then
+    r = s
+  elseif padding > 0 then -- s is shorter than n chars
+    r = rep(' ', left) .. s .. rep(' ', right)
+  else
+    assert(padding < 0)  -- s is more than n chars.
+    r = pad_string(s, n) -- use same algo as pad_string
+  end
+  return r
+end
+
 -- do something if s is shorter/longer than n.
-function pad_or_shorten_loc_str(s, n)
+function pad_string(s, n)
   local padding = n - #s
   local r
   if padding == 0 then
@@ -347,7 +366,7 @@ function dlogue(loc, level, ...)
     loc_str = join(loc, '.')
   end
 
-  loc_str = pad_or_shorten_loc_str(loc_str, 12)
+  loc_str = pad_string(loc_str, 12)
 
   io.write('dlog', level, ' ', loc_str, ': ')
   for i = 1, select('#', ...) do
