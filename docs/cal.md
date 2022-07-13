@@ -25,8 +25,7 @@
 
 * CSVLang is an exploration of the tradeoffs involved in designing a system
   that prioritizes goals like the above, especially when we don't rule out the
-  the use of highly declarative programming models, and are prepared to use
-  OS/standard UX patterns.
+  the use of highly declarative programming models.
 
 * Caveat: the "loss of control", the very strict separation of layers, and
   opinionated type system will probably feel strange at first. The hope is
@@ -106,12 +105,12 @@ Here's how printing a calendar maps to the IA-based approach:
   many coordinates as there are dimensions.  This is *intrinsic complexity* and
   cannot be wished away.
 
-  But note that this is still abstract: we "reshaped" the data, but we didn't
-  say anything about rows and cells as in a table.
+  This IAModel is still abstract: we "reshaped" the data, but we didn't say
+  anything about rows and cells as in a table.
 
-  That will be a hint to the rest of the system that *this* IAModel can/should
-  be matched up with some View to produce 2D output like on paper, text console,
-  or in graphical viewport.
+  But the presence of two coordinates will be a hint to the rest of the system
+  that this IAModel can/should be matched up with some View that produces *2D*
+  output like on paper, text console, or in graphical viewport.
 
       date,dow,yy,mm,dd,monthweek,ycoor,xcoor,coorvalue
       2022-07-01,6,2022,07,01,1,1,5,1
@@ -141,13 +140,6 @@ Here's how printing a calendar maps to the IA-based approach:
   example, a GridView capable of laying out any IAModel is used. See the call
   to csv_render_as_grid() in cal.lua.
 
-  For console output, this amounts to constructing a matrix in memory and
-  printing it, with some standard stuff like automatically resizing column
-  widths. Kinda like rendering a HTML table. The X and Y coordinate hints in
-  the IAModel are used here. Things like fonts, color for console output are
-  all done here. Graphical output, PDF output etc *must* be different Views
-  than console output.
-
   The hope is that a single View capable of displaying a table can be
   automatically used for a wide range of IAModels, with the rich type system
   guiding both matching and rendering policies.
@@ -164,12 +156,19 @@ Here's how printing a calendar maps to the IA-based approach:
   For multipage calendars, *this* is where different output will be generated
   depending upon whether it's single-page, multipage.
 
+  For console output, this amounts to constructing a matrix in memory and
+  printing it, with some standard stuff like automatically resizing column
+  widths. Kinda like rendering a HTML table. The X and Y coordinate hints in
+  the IAModel are used here. Things like fonts, color for console output are
+  all done here. Graphical output, PDF output etc *must* be different Views
+  than console output.
+
   **Note:** under the hood, the output of this View itself is itself a "csv
   table". Quite literally it's a simple matrix of characters, like an
-  old-school CGA text mode. The decision to render that matrix on the console
-  is done *after* the View is generated, and the code to do that is common
-  across all Views.  Defining things like this may turn out to be useful for
-  automatic composition of UIs.
+  old-school text mode video memory. The decision to render that matrix on the
+  console is done *after* the View is generated, and the code to do that is
+  common across all Views.  Defining things like this may turn out to be useful
+  for automatic composition of UIs.
 
 * **Controller:** (wip) The basic idea would be that the IAModel-to-View
   matching process will record enough information so that *for the types built
