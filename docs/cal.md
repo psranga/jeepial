@@ -32,18 +32,15 @@
   opinionated type system will probably feel strange at first. The hope is
   that the benefits far outweigh the costs.
 
-## Motivation/Manifesto
+## Motivation
 
 This is part of my ongoing investigation into what it would take to build an
 ultra-performant, low-power, inexpensive home computer, with a software stack
-that emphasizes end-user ergonomics and user-data/platform longevity above
-all.
-
-What gets dropped on the floor:
-
-*  all backward compatibility contraints: all tech/UX is up for questioning.
-*  system-developer ergonomics: everything is up for a rewrite, with a healthy
-   skepticism about reinventing the wheel.
+that emphasizes end-user ergonomics and user-data/platform longevity above all.
+What gets dropped on the floor is all backward compatibility constraints, and
+system-developer ergonomics. All tech/UX is up for questioning/rewriting, with
+a healthy skepticism about reinventing the wheel. e.g., IPv6-only with IPv4
+being dropped is on the table.
 
 ## Core ideas in the programming model
 
