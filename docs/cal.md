@@ -235,40 +235,4 @@ Look at cal.lua and csvlib.lua.
   parallelizable, which is likely why such a functionality isn't available in
   SQL.
 
-## Random Asides
-
-### Example of bit rot in View and Controller
-
-It sometimes takes multiple
-*minutes* for SomeMediaApp to rescan the files on my SomeMobileOS phone before
-I can pick something from the list. Most likely, it's due to the app using an
-"older API" that used to be fine, but has *become* slower recently.
-
-I feel bad blaming any of the stakeholders because I'm pretty sure they
-all have good reasons for the changes.
-
-Instead, we should probably "design away" the problem by decoupling the
-various systems in a principled way.
-
-Having said this, I can say that some changes, while wrenching are totally
-justified. e.g., removing immediate mode from OpenGL (this vastly vastly
-increased the complexity of 3D programming -- you could no long just worry
-about the math), IPv6 vs IPv4 (IPv4 turndown is long overdue IMO).
-
-### Some info from the past related to the motivation
-
-I don't think today's
-software can do multimedia *multitasking* as well as BeOS did 25 years ago.
-What the [Taos guys wrote in ...  1995](http://www.uruk.org/emu/Taos.html)
-still rings true.  So let's revisit history to see if any technologies that
-"lost" have useful lessons for today, or can be used as is (e.g., BBC BASIC).
-
-### Day of the week is interesting
-
-The column monthweek reflects the (arbitrary)
-human-designed way to group the days within a month by weeks. And weeks in turn
-depend on the days of the week. Oddly, days of the week run continously without
-consideration for leap years or the differences in the number of days in months
-(but they *do* respect leap seconds).
-  
 eof
